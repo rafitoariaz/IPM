@@ -78,9 +78,10 @@ colnames(second_year)[1:11]<-c("Patch","Plot","Clump","Found","Alive","Height_cm
 colnames(third_year)[1:12]<-c("Patch","Plot","Clump","Found","Alive","Height_cm","Bracts","FreshFlwrs","new","seedling","DNA","inside_10_m_plot")
 
 #ADDED THESE LINES TO FILTER INDIVIDUALS THAT WERE IN BOTH YEARS INSIDE THE 10X10M PLOTS
+#For first year
 second_year<-second_year %>% 
   filter(inside_10_m_plot=="Y")
-
+#For second year
 third_year<-third_year %>% 
   filter(inside_10_m_plot=="Y")
 
@@ -98,7 +99,7 @@ select(Patch,Plot,Clump) %>%
   distinct() %>% 
   summarise(n())
 
-#Summarise by plot
+#Summarise mean, sd, min and max number of plants by plot
 select(first_year,Patch,Plot,Clump) %>% 
   bind_rows(select(second_year,Patch,Plot,Clump)) %>% 
   bind_rows(select(third_year,Patch,Plot,Clump)) %>% 
@@ -115,7 +116,7 @@ select(first_year,Patch,Plot,Clump) %>%
             min=min(.$n),
             max=max(.$n))
 
-#Summarise by patch
+#Summarise mean, sd, min and max number of plants by patch
 select(first_year,Patch,Plot,Clump) %>% 
   bind_rows(select(second_year,Patch,Plot,Clump)) %>% 
   bind_rows(select(third_year,Patch,Plot,Clump)) %>% 
@@ -360,7 +361,7 @@ aggregate.height.reproduction[[3]]$year<-as.factor(2017)
 ###Remove the data base that I will not use anymore
 ```{r,echo=F,include=F}
 
-rm(aggregate.height,first_year,second_year,third_year,aggregate.prob.rep.num.infl,aggregate.num.bracts)
+rm(aggregate.height,first_year,second_year,third_year,aggregate.prob.rep.num.infl,aggregate.num.bracts,function.x,i)
 
 ```
 

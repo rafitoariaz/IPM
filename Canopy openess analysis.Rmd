@@ -1,0 +1,236 @@
+---
+title: "Canopy openess"
+author: "Luis Antonio Arias Medellin"
+date: "September 26, 2018"
+output: html_document
+---
+
+```{r,echo=F,include=F}
+
+#Remove anything on workspace
+rm(list=ls(all=TRUE))
+
+#Load libraries
+library("openxlsx")
+library("lme4")
+
+#Set working directory
+#setwd("/media/ResNAS/Integral Projection Models 2016/My work")
+#setwd("Z:/Data bases")
+#setwd("E:/Doctorado")
+
+#Load file. 
+canopy<-read.xlsx("Demographic_plot_data_Costa_Rica_forLuis_2016.06.12.xlsx",sheet=4)
+
+#Format dates when they were planted
+canopy$Date<-as.Date(canopy$Date,origin="1899-12-30")
+
+#Mean of the measurements of canopy openess and scores
+canopy$open_mean<-rowMeans(canopy[,5:8],na.rm=T)
+canopy$score_mean<-rowMeans(canopy[,9:12],na.rm=T)
+
+#Read excel data base of patch id, patch size and % forest
+patches<-read.xlsx("Site_info_Costa_Rica.xlsx",sheet=1)
+
+#Keep columns of interest
+patches<-patches[,c(1,5,6,3)]
+
+#Rename columns
+colnames(patches)<-c("Patch","percent_forest","elevation","patch_size")
+
+
+#Merge areas with patch information data bases
+canopy<-merge(canopy,patches,by="Patch")
+```
+
+```{r}
+#See the year in which each plot was sampled
+table(substr(canopy$Date,1,4),canopy$Patch)
+
+```
+
+```{r,include=F}
+#See if variables are normally distributed
+par(mfrow = c(1, 2))
+hist(canopy$open_mean) #This one
+hist(log(canopy$open_mean))
+#canopy$log_open_mean<-log(canopy$open_mean)
+
+hist(canopy$score_mean)
+hist(log(canopy$score_mean))#This one 
+canopy$log_score_mean<-log(canopy$score_mean)
+
+hist(canopy$percent_forest) #This one
+hist(log(canopy$percent_forest)) 
+#canopy$log_prop.landscape<-log(canopy$percent_forest)
+
+hist(canopy$patch_size) 
+hist(log(canopy$patch_size))
+canopy$log_patch_size<-log(canopy$patch_size) #This one although is not the best
+
+hist(canopy$elevation)  #This one although is not the best
+hist(log(canopy$elevation))
+#canopy$log_elevation<-log(canopy$elevation)
+```
+
+```{r,echo=FALSE}
+
+panel.hist <- function(x, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(usr[1:2], 0, 1.5) )
+    h <- hist(x, plot = FALSE)
+    breaks <- h$breaks; nB <- length(breaks)
+    y <- h$counts; y <- y/max(y)
+    rect(breaks[-nB], 0, breaks[-1], y, col = "cyan", ...)
+}
+
+
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(0, 1, 0, 1))
+    r <- abs(cor(x, y))
+    txt <- format(c(r, 0.123456789), digits = digits)[1]
+    txt <- paste0(prefix, txt)
+    if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+    text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+```
+
+```{r}
+#Pairs with the best data for the lineal model (although best does not mean that it is ok). It seems that none of the variables is affecting canopy openess. Maybe look more for light measurements, since canopy can be the same but maybe there might be less light in high elevations due to more clouds and fog there
+pairs(canopy[,c(13,18,19,15,16)],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+```
+
+```{r}
+#I am not incuding year since there are no observations (except for one) that were taking in two consecutive years
+#table(substr(canopy$Date,1,4),canopy$Patch)
+library("nlme")
+mod.1<-gls(open_mean ~ log_patch_size + percent_forest + elevation,method = "REML", data = subset(canopy,is.na(canopy$open_mean)==FALSE))
+summary(mod.1)
+
+
+#GLMM nesting plot
+#mod.2<-lme(sizeNext~scale(size)+scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(mean_openess)+year,random = ~1 | Patch,data=data_growth_surv_diff_canopy,method="REML")
+mod.2<-lme(open_mean ~ log_patch_size + percent_forest + elevation,random = ~1 | Patch,data=subset(canopy,is.na(canopy$open_mean)==FALSE),method="REML")
+summary(mod.2)
+
+
+#Without elevation
+mod.3<-lme(open_mean ~ log_patch_size + percent_forest,random = ~1 | Patch,data=subset(canopy,is.na(canopy$open_mean)==FALSE),method="REML")
+summary(mod.3)
+
+#Without patch size
+mod.4<-lme(open_mean ~ percent_forest,random = ~1 | Patch,data=subset(canopy,is.na(canopy$open_mean)==FALSE),method="REML")
+summary(mod.4)
+
+weights(AIC(mod.1,mod.2,mod.3,mod.4))
+```
+
+
+```{r}
+library("tidyr")
+library("dplyr")
+library("ggplot2")
+
+canopy.mean<-mean(100-canopy$open_mean,na.rm=T)
+canopy %>% 
+  mutate(Patch=as.factor(Patch),
+         open_mean=100-open_mean) %>% 
+  ggplot(aes(x=Patch,y=open_mean)) +
+  geom_boxplot() +
+  xlab("Patch id") +
+  ylab("Mean canopy openness (%)") +
+  ggtitle("Mean canopy openess between patches") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = canopy.mean,col="red",linetype="dashed")
+  ggsave("Graphs/canopy openess between patches.jpg")
+  
+  p1<-canopy %>% 
+  mutate(Patch=as.factor(Patch),
+         open_mean=100-open_mean) %>% 
+    ggplot(aes(x=log_patch_size,y=open_mean)) + 
+    geom_point() + 
+    geom_smooth(method="lm",color="red") +
+    xlab("Log patch size") +
+    ylab("Mean canopy openness (%)") +
+  geom_text(x=6.8, y=25, label="a)",fontface="bold")
+  
+  
+    p2<-canopy %>% 
+  mutate(Patch=as.factor(Patch),
+         open_mean=100-open_mean) %>% 
+    ggplot(aes(x=percent_forest,y=open_mean)) + 
+    geom_point() + 
+    geom_smooth(method="lm",color="red") +
+    xlab("Percent of forest cover") +
+    ylab("Mean canopy openness (%)") +
+  geom_text(x=75, y=25, label="b)",fontface="bold")
+    
+    
+      p3<-canopy %>% 
+  mutate(Patch=as.factor(Patch),
+         open_mean=100-open_mean) %>% 
+    ggplot(aes(x=elevation,y=open_mean)) + 
+    geom_point() + 
+    geom_smooth(method="lm",color="red") +
+    xlab("Elevation (m.a.s.l.)") +
+    ylab("Mean canopy openness (%)") +
+  geom_text(x=1500, y=25, label="c)",fontface="bold")
+      
+library("gridExtra")
+p3<-grid.arrange(p1, p2,p3, ncol=3)
+ggsave("Graphs/canopy openess vs variables.jpg",plot=p3)
+
+rm(p1,p2,p3)
+
+jpeg("Graphs/canopy openess vs variables.jpg",quality=100,width=1200,height=350)
+#PAtch size
+par(mar=c(6,6,3,2),mfrow=c(1,3))
+plot(canopy$log_patch_size,100-canopy$open_mean,xlab="Log patch size",ylab="Mean canopy openness (%)",main="Patch size",cex=2,cex.axis=2,cex.lab=2,cex.main=2)
+text(labels="a)",x=7,y=23,cex=1.5,font=2)
+
+#Percent of forest
+plot(canopy$percent_forest,100-canopy$open_mean,xlab="Percent of forest",ylab="Mean canopy openness (%)",main="Percent of forest",cex=2,cex.axis=2,cex.lab=2,cex.main=2)
+text(labels="b)",x=74,y=23,cex=1.5,font=2)
+
+#Elevation
+plot(canopy$elevation,100-canopy$open_mean,xlab="Elevation (m.a.s.l.)",ylab="Mean canopy openness (%)",main="Elevation",cex=2,cex.axis=2,cex.lab=2,cex.main=2)
+text(labels="c)",x=1480,y=23,cex=1.5,font=2)
+
+dev.off()
+```
+
+
+```{r,include=F}
+#Histogram of data. 
+hist(canopy$open_mean) #This one
+hist(canopy$score_mean)
+
+#Aggregate canopy score and openess by patch
+agg.openess<-aggregate(canopy$open_mean,by=list(Patch=canopy$Patch),FUN=mean,na.rm=T)
+agg.score<-aggregate(canopy$score_mean,by=list(Patch=canopy$Patch),FUN=mean,na.rm=T)
+
+#Rename columns
+colnames(agg.openess)[2]<-"mean_openess"
+colnames(agg.score)[2]<-"mean_openess"
+
+#Merge aggregates of canopy score and openess with patch information
+agg.openess<-merge(agg.openess,patches,by="Patch")
+agg.score<-merge(agg.score,patches,by="Patch")
+
+#Obtain logarithm of patch size
+agg.openess$logpatch_size<-log(agg.openess$patch_size)
+agg.score$logpatch_size<-log(agg.score$patch_size)
+
+#Plot
+pairs(agg.openess[,c(-1,-5)],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+pairs(agg.score[,c(-1,-5)],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+
+#Convert patch from numeric to factor
+agg.openess$Patch<-as.factor(agg.openess$Patch)
+
+#The variable mean_openess says how much cover there is, so in reality is mean_closuer. Because it can have values between 0 and 100, I will substract 100 minus the column value. 
+agg.openess$mean_openess<-100-agg.openess$mean_openess
+```
