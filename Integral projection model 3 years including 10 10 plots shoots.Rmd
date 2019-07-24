@@ -1,0 +1,3831 @@
+---
+title: "Integral projection model"
+author: "Luis Antonio Arias Medellin"
+date: "August 13, 2018"
+output: html_document
+---
+###Preparing and formating the data base for analysis
+Data base created:
+
+* __data.all.years:__ it is a __list__ containing the __raw data of the demographic information for each year__. It has the following structure:
+  
+  + __first.year:__ 
+  
+    + __ID:__ individual id of each individual shoot
+    + __Patch:__ id of sampled patch
+    + __Plot:__ id of sampled plot. Each patch has 3 plot
+    + __Clump:__ id of the clump. A clump is a group of clonal shoots that are considered the same individual.
+    + __Height_cm:__ the height of each individual shoot in centimeters
+    + __Bracts:__ number of bracts produced per shoot
+    + __FreshFlwrs:__ number of new flowers
+    + __Seedling:__ is the individual a seedling? Y or N
+    + __Notes__
+  
+  + __second.year:__ 
+  
+    + __Patch:__ id of sampled patch
+    + __Plot:__ id of sampled plot. Each patch has 3 plot
+    + __Clump:__ id of the clump. A clump is a group of clonal shoots that are considered the same individual.
+    + __Found:__ Where the tag and the individual found? Y or N
+    + __Alive:__ If found, is the plant alive? (Y/N)
+    + __Height_cm:__ the height of each individual shoot in centimeters
+    + __Bracts:__ number of bracts produced per shoot
+    + __FreshFlwrs:__ number of new flowers
+    + __10_m_plot:__ Is the individual within the 10x10m plot? (Y/N)
+    + __new:__ is the individual a new one?
+    + __seedling:__ is the individual a seedling? Y or N
+    + __Notes__
+  
+  + __third.year:__
+  
+    + __Patch:__ id of sampled patch
+    + __Plot:__ id of sampled plot. Each patch has 3 plot
+    + __Clump:__ id of the clump. A clump is a group of clonal shoots that are considered the same individual.
+    + __Found:__ Where the tag and the individual found? Y or N
+    + __Alive:__ If found, is the plant alive? (Y/N)
+    + __Height_cm:__ the height of each individual shoot in centimeters
+    + __Bracts:__ number of bracts produced per shoot
+    + __FreshFlwrs:__ number of new flowers
+    + __new:__ is the individual a new one?
+    + __seedling:__ is the individual a seedling? Y or N
+    + __DNA__
+    + __10_m_plot:__ Is the individual within the 10x10m plot? (Y/N)
+    + __Notes__
+
+```{r,echo=F,include=F}
+###THIS CHUNK IS FOR PREPARING AND FORMATING THE DATA BASE FOR ANALYSIS
+#Remove anything on workspace
+rm(list=ls(all=TRUE))
+
+#Load libraries
+library("openxlsx")
+library("IPMpack")
+library("dplyr")
+library("fields")
+
+#Load file with demorgarphic data for each year
+first_year<-read.xlsx("Demographic_plot_data_marked_Costa_Rica_complete version.xlsx",sheet=7) %>% filter(Height_cm>=75) #For data for Adam
+second_year<-read.xlsx("Demographic_plot_data_marked_Costa_Rica_complete version.xlsx",sheet=8) %>% filter(Height_cm>=75) #For data for Adam
+third_year<-read.xlsx("Demographic_plot_data_marked_Costa_Rica_complete version.xlsx",sheet=9) %>% filter(Height_cm>=75) #For data for Adam
+
+
+#Rename columns
+first_year<-first_year[,-1]
+colnames(first_year)[1]<-"Patch"
+
+colnames(second_year)[1:11]<-c("Patch","Plot","Clump","Found","Alive","Height_cm","Bracts","FreshFlwrs","inside_10_m_plot","new","seedling")
+
+colnames(third_year)[1:12]<-c("Patch","Plot","Clump","Found","Alive","Height_cm","Bracts","FreshFlwrs","new","seedling","DNA","inside_10_m_plot")
+
+#ADDED THESE LINES TO FILTER INDIVIDUALS THAT WERE IN BOTH YEARS INSIDE THE 10X10M PLOTS
+second_year<-second_year %>% 
+  filter(inside_10_m_plot=="Y")
+
+third_year<-third_year %>% 
+  filter(inside_10_m_plot=="Y")
+
+
+#Set a variable to identify year
+first_year$year<-as.factor(2013)
+second_year$year<-as.factor(2015)
+third_year$year<-as.factor(2017)
+
+#Number of sampled plants
+first_year %>% 
+select(Patch,Plot,Clump) %>% 
+  bind_rows(select(second_year,Patch,Plot,Clump)) %>% 
+  bind_rows(select(third_year,Patch,Plot,Clump)) %>% 
+  distinct() %>% 
+  summarise(n())
+
+#Summarise by plot
+select(first_year,Patch,Plot,Clump) %>% 
+  bind_rows(select(second_year,Patch,Plot,Clump)) %>% 
+  bind_rows(select(third_year,Patch,Plot,Clump)) %>% 
+  distinct() %>% 
+  group_by(Patch,Plot) %>% 
+  summarise(n()) %>% 
+  ungroup() %>% 
+  select(`n()`) %>% 
+  mutate(n=as.numeric(`n()`)) %>% 
+  select(n) %>% 
+  summarise(sum=sum(.$n),
+    mean=mean(.$n),
+            sd=sd(.$n),
+            min=min(.$n),
+            max=max(.$n))
+
+#Summarise by patch
+select(first_year,Patch,Plot,Clump) %>% 
+  bind_rows(select(second_year,Patch,Plot,Clump)) %>% 
+  bind_rows(select(third_year,Patch,Plot,Clump)) %>% 
+  distinct() %>% 
+  group_by(Patch) %>% 
+  summarise(n()) %>% 
+  ungroup() %>% 
+  select(`n()`) %>% 
+  mutate(n=as.numeric(`n()`)) %>% 
+  select(n) %>% 
+  summarise(sum=sum(.$n),
+    mean=mean(.$n),
+            sd=sd(.$n),
+            min=min(.$n),
+            max=max(.$n))
+
+
+
+#Make a list of the three data sets
+data.all.years<-list(first_year,second_year,third_year)
+
+#Name each element of the list
+names(data.all.years)<-c("first.year","second.year","third.year") 
+
+```
+
+###Preparing the data base for analyzing growth rates (height of individuals between years) and survival between years. I produced a data base that has the following structure
+* __growth.survival.data:__
++ __first.transition:__ data for 2013-2015
+  + __Patch__
+  + __Plot__
+  + __Clump__
+  + __size:__ height of an indivdual clump at time t. It was obtained by summing the individual heights of all the shoots in a clump, then a 1 was summed (because there were 0's in the data base) and then it was log transformed
+  + __sizeNext:__ same value as size but for the following year
+  + __year:__ the sampled year
+  + __surv:__ indicates if the individual survived or not (1 or 0)
+  + __sizeOriginal:__ the original value of height of the clumps in centimeters
+  + __sizeNextOriginal:__ same as sizeOriginal but for the next transition
+  + __stage:__ indicates that the height value is a continuous stage
+  
++ __second.transition:__ data for 2015-2017. Same values as firs.transition
+
+```{r,echo=F,include=F}
+##GROWTH AND SURVIVAL
+#Copy data base with list
+aggregate.height<-data.all.years
+
+#*******In survival from second year, subset individuals that are both Y and N. Na were individuals that were not found???? THE INDIVIDUALS THAT HAD NA ARE CONSIDERED AS DEAD
+#second_year<-subset(second_year,!is.na(second_year$Alive)) NOTE: SEE IF NOT RUNNING THIS LINE THIS AFFECTS THE CODE
+#for (i in 2:3){
+  #aggregate.height[[i]]<-subset(aggregate.height[[i]],aggregate.height[[i]]$new=="Y")
+#}
+
+#Create a function for aggregating by patch, plot and clump. *****Results: BY DOING THIS I WILL OBTAIN THE HEIGHT OF INDIVIDUALS THAT WERE SAMPLED IN THE FIRST, SECOND AND THIRD YEAR
+function.x<-function(input){
+  output<-input %>%
+    group_by(Patch,Plot,Clump) %>%
+    summarise(size = n()) %>% 
+    ungroup()
+  return(output)
+}
+
+#Apply function to list
+aggregate.height<-lapply(data.all.years,function.x)
+
+
+#Make a list where I merge the 2013 with 2015 data and 2015 with 2017 data for estimating growth and survival between years
+growth.survival.data<-list(first.transition=merge(aggregate.height[[1]],aggregate.height[[2]],by=c("Patch","Plot","Clump"),all=T),second.transition=merge(aggregate.height[[2]],aggregate.height[[3]],by=c("Patch","Plot","Clump"),all=T))
+
+#******There are some individuals that are not new but were not sampled in the first year, so I will remove them. I CAN INCLUDE THEM WHEN I HAVE DEMOGRAPHIC DATA FROM THE 2017 SAMPLE.****SEE IF THIS WOULD AFFECT MY DATA BASE
+#data<-subset(data,is.na(data$size)!="TRUE")
+
+##Add a 1 to the size since there are 0's and when I log transform the value I get isn -inf
+for (i in 1:2){
+  growth.survival.data[[i]]$size.x<-growth.survival.data[[i]]$size.x+1
+  colnames(growth.survival.data[[i]])[4]<-"size"
+}
+
+for (i in 1:2){
+  growth.survival.data[[i]]$size.y<-growth.survival.data[[i]]$size.y+1
+  colnames(growth.survival.data[[i]])[5]<-"sizeNext"
+}
+
+#Add year of demographic vital rate
+growth.survival.data[[1]]$year<-as.factor(2015)
+growth.survival.data[[2]]$year<-as.factor(2017)
+
+library("tidyr")
+function.x<-function(input){
+  output<-input %>% 
+    mutate(surv=if_else(sizeNext>1,1,0)) %>% #Add survivorship column depending on the height of the individual. If it survives=1, if not=0. Here I put that they are dead if the size is greater than 1 because in the previous chunk I added a 1 to each value beacuase I was going to log transform the data and I needed the sizes not be 0
+    
+    mutate(surv=replace_na(surv, 0)) %>% #Replace any NA with 0
+    
+    mutate(sizeNext=ifelse(sizeNext==1,NA,sizeNext)) %>%  #The survNext columns can only have values greater than 0. If the individual is dead then it has to say NA
+    
+    mutate(sizeOriginal=size-1) %>% #Here I am saving the original size data before log transforming it. I substract 1 because before I summed 1 to log transform it later
+    mutate(sizeNextOriginal=sizeNext-1) %>% 
+    
+    mutate(size=log(size)) %>% #log transform data
+    mutate(sizeNext=log(sizeNext)) %>% 
+    
+    mutate(stage="continuous",stageNext="continuous") %>% #Add a column to specify if the size and sizeNext are continuous or discrete
+    
+    mutate(stageNext=ifelse(surv==0,"dead",stageNext)) %>% #If an individual did not survive, it is labelled as dead to t+1 for its stageNext.
+    
+    mutate(Patch=factor(Patch),Plot=factor(Plot))
+}
+
+#Apply function
+growth.survival.data<-lapply(growth.survival.data,function.x)
+
+
+```
+
+
+###PROBABILITY OF REPRODUCTION AND NUMBER OF INFLORESENCES PER CLUMP 
+#Create a data base named aggregate.prob.rep.num.infl that has the following structure:
+* __first.year:__
+  + __Patch__
+  + __Plot__
+  + __Clump__
+  + __fec2:__ number of inflorescences per shoot.
+  + __fec1:__ number of bracts per clump
+  + __offspringNext:__ label to indicate that it is sexual reproduction
+  
+* __second.year:__ same structure as first.year
+* __third.year:__ same structure as first.year
+
+```{r,echo=F,include=F}
+#Create list for each year.
+aggregate.prob.rep.num.infl<-list(first_year[,c(1:3,5)],second_year[,c(1:3,7)],third_year[,c(1:3,7)])
+
+#Make a function for obtaining the number of inflorescences pero clump and the probability of reproduction
+function.x<-function(input){
+  output<-input %>%
+    group_by(Patch,Plot,Clump) %>%
+    mutate(fec2=if_else(Bracts>0,1,0)) %>% #If it has bracts, then there has to be one inflorescence for that shoot. CHECK IF THIS IS TRUE SINCE I DO NOT KNOW IF ONE SHOOT CAN PRODUCE SEVERAL INFLORESCENCES
+    summarise(fec2=sum(fec2,na.rm=T)) %>% #Obtain the number of inflorescences pero clump
+    mutate(fec1=if_else(fec2>0,1,0)) %>% #Obtain the probability of reproduction based on presence/absence of inflorescences, which is obtained by presence/abscence of bracts
+    mutate(fec2=na_if(fec2,0)) %>% #Double check that if there is NA it has to be converted to 0
+    mutate(offspringNext=ifelse(fec1==1,"sexual","NA")) %>% #Label "sexual" when an individual is reproductive th
+    ungroup()
+  return(output)
+  
+}
+
+#Apply function to both data bases
+aggregate.prob.rep.num.infl<-lapply(aggregate.prob.rep.num.infl,function.x)
+
+#Name the lists
+names(aggregate.prob.rep.num.infl)<-c("first.year","second.year","third.year")
+
+```
+
+###Mean number of bracts per inflorescence
+Here I generate a data base named aggregate.num.bracts containing the mean number of bracts per inflorescence. It is structured in the following way:
+
+* __first.year:__
+  + __Patch__
+  + __Plot__
+  + __Clump__
+  + __fec3:__ mean number of bracts per inflorescence
+  
+* __second.year:__ same structure as first.year
+* __third.year:__ same structure as first.year
+
+```{r,echo=F,include=F}
+##MEAN NUMBER OF BRACTS PER INFLORESCENCE
+#Make a list of data base for each year 
+aggregate.num.bracts<-list(first_year[,c(1:3,5)],second_year[,c(1:3,7)],third_year[,c(1:3,7)])
+
+#Make a function for obtaining the mean number of bracts per clump
+function.x<-function(input){
+  output<-input %>%
+    group_by(Patch,Plot,Clump) %>%
+    summarise(fec3=mean(Bracts,na.rm=T)) %>%
+    mutate(fec3=round(fec3)) %>% #PAY ATTENTION HOW ROUND FUNCTIONS
+    mutate(fec3=na_if(fec3,0)) %>%
+    ungroup()
+  return(output)
+  
+}
+
+#Apply function to both data bases
+aggregate.num.bracts<-lapply(aggregate.num.bracts,function.x)
+
+#Name the lists
+names(aggregate.num.bracts)<-c("first.year","second.year","third.year")
+
+```
+
+#Here I will make a data base containing the information of reproduction depending on size by merging the data base containing the probability of reproduction and number of inflorescences (aggregate.prob.rep.num.infl) and mean number of bracts per inflorescence (aggregate.num.bracts) with the height of each clump (aggregate.height)
+
+* __first.year:__
+  + __Patch__
+  + __Plot__
+  + __Clump__
+  + __size:__ height of an indivdual clump at time t. It was obtained by summing the individual heights of all the shoots in a clump, then a 1 was summed (because there were 0's in the data base) and then it was log transformed
+  + __fec2:__ number of inflorescences per shoot.
+  + __fec1:__ number of bracts per clump
+  + __offspringNext:__ label to indicate that it is sexual reproduction
+  + __fec3:__ mean number of bracts per inflorescence
+  + __sizeOriginal:__ the original value of height of the clumps in centimeters  
+  + __year:__ the sampled year
+
+  
+* __second.year:__ same structure as first.year
+* __third.year:__ same structure as first.year
+
+```{r,echo=F,include=F}
+#Merge lists of first, second and third years of height and reproduction (i.e. probability of reproduction, # inflorescences, # bracts)
+function.x<-function(input_list){
+  output_list = list()
+  for (i in seq_along(input_list)) {
+    output_list[[i]]<-input_list[[i]] %>%
+    left_join(aggregate.prob.rep.num.infl[[i]],by=c("Patch","Plot","Clump")) %>%
+    left_join(aggregate.num.bracts[[i]],by=c("Patch","Plot","Clump")) %>% 
+      filter(!is.na(size)) %>% 
+      mutate(size.original=size) %>% 
+      mutate(size=log(size.original+1)) %>% 
+      mutate(Patch=as.factor(Patch)) %>% 
+      mutate(Plot=as.factor(Plot))
+  }
+  
+  return(output_list)
+}
+
+#Run function
+aggregate.height.reproduction<-function.x(aggregate.height)
+
+#Name list elements
+names(aggregate.height.reproduction)<-c("first.year","second.year","third.year")
+
+#Add year
+aggregate.height.reproduction[[1]]$year<-as.factor(2013)
+aggregate.height.reproduction[[2]]$year<-as.factor(2015)
+aggregate.height.reproduction[[3]]$year<-as.factor(2017)
+```
+
+
+###Remove the data base that I will not use anymore
+```{r,echo=F,include=F}
+
+rm(aggregate.height,first_year,second_year,third_year,aggregate.prob.rep.num.infl,aggregate.num.bracts)
+
+```
+
+
+###Create an object named patches.info containing information of each patch about elevation, patch size and proportion of forest. The structure is the following:
+
+* __Patch__
+* __percent_forest:__ the percent of forest cover in a 1 km radius around the focal patch
+* __elevation__
+* __patch_size__
+* __logpatch_size:__ logarithm of patch size
+
+```{r,echo=F,include=F}
+
+#******Subset seedlings found in second sample year by Patch, plot, clump. THERE ARE NEW INDIVIDUALS THAT ARE NOT SEEDLINGS. CHECK WHAT ARE THEY. THIS LINES WERE ACTIVE BUT I DESACTIVATED THEM. SEE IF IT HAS ANY REPERCUSITIONS
+#second_seedlings<-subset(second_year,second_year$new=='Y' & second_year$seedling=='Y')
+
+#Keep columns of interest
+#second_seedlings<-second_seedlings[,c(1:3,6)]
+
+
+
+#Read excel data base of patch id, patch size and % forest
+#patches<-read.xlsx("/home/luis/Desktop/Doctorado/Capture_sites information.xlsx",sheet=1)
+patches<-read.xlsx("Information patches Costa Rica.xlsx",sheet=1)
+
+#Keep columns of interest
+patches<-patches[,c(1,4:6)]
+
+#Rename columns
+colnames(patches)<-c("Patch","percent_forest","elevation","patch_size") #There is no information on patch 15, 27, 28, 35, 62, 63. Patches 12 and 39 are on the database but there is no information since they have NA
+
+
+#Merge patch information with data base. I DISABLED THIS PART OF THE CODE SINCE I THINK I WILL NOT USE DATA.ALL.YEARS DATA BASE FROM NOW ON. sEE IT IF AFFECTS THE CODE FROM NOW ON
+#function.x<-function(input){
+#  output<-input %>% 
+#    inner_join(patches,by="Patch")
+#}
+
+#data.all.years<-lapply(data.all.years,function.x)
+
+
+#Obtain information of each individual patch, patch size, percent forest, elevation and sampled year that I have
+
+#Crating a data frame with the information of each patch
+patches.id<-unique(rbind(data.frame(Patch=data.all.years[[1]]$Patch),data.frame(Patch=data.all.years[[2]]$Patch),data.frame(Patch=data.all.years[[3]]$Patch)))
+
+#Create data base with information of patch, % forest, elevation and patch size
+patches.info<-merge(patches.id,patches,by="Patch",all=F)
+
+#Subset if there is a patch that is in the data base but has no information of patch characteristics. Example: 12 and 39
+patches.info<-subset(patches.info,is.na(patches.info$percent_forest)=="FALSE")
+
+summary(patches.info)
+
+#Transform any data from patch.info if needed
+patches.info$logpatch_size<-log(patches.info$patch_size)
+
+rm(patches.id,patches)
+
+
+
+##********I am going to take out patch 12 since it has NA's because it was sampled on 2013 but not in 2015. Patches 39 and 40 have low amount of individuals, so I will take them out. I DESACTIVATED THIS. SEE IF IT IS OK
+#data<-subset(data,data$Patch!=12)
+#data<-subset(data,data$Patch!=39)
+#data<-subset(data,data$Patch!=40)
+
+####This is the information I have
+#head(data)
+#head(second_aggregate_size)
+
+
+```
+
+#I analyze the information of canopy openess per patch in another R file. I will run it externally using source. The agg.openess data base with information of canopy openess, elevation, patch size, percent of forest was generated and has the following structure:
+* __Patch__
+* __mean_openess:__ in each corner of each plot, a measurement of canopy openess was taken and then the mean was obtained
+* __elevation__
+* __patch_size__
+* __logpatchsize__
+
+```{r,echo=F}
+#ANALYSIS OF GROWTH USING CANOPY OPENESS
+
+#Obtain the canopy openess values from another script I made. Purl is used to obtain the code from an RMD file. If I run it, I need to go direclty to the ouput
+library("knitr")
+#purl("Canopy openess analysis.Rmd",output="Canopy openess analysis code.R")
+#I HAVE TO ANALYZE DATA OF CANOPY OPENESS BY YEAR TO SEE IF THEY ARE DIFFERENCES
+source("Canopy openess analysis code.R",local=T)
+
+#I will remove data bases that I used in the source file but will not use here
+rm(canopy,patches,agg.score)
+```
+
+#Here I generate a data base to obtain information of the seedling size
+```{r,echo=F,include=F}
+#colnames(data.all.years[[3]])[10]<-"Seedling"
+
+seedling.size<-bind_rows(data.all.years[[2]][,c("Patch","Plot","Clump","seedling","new","Height_cm","year")],data.all.years[[3]][,c("Patch","Plot","Clump","seedling","new","Height_cm","year")]) %>% 
+  filter(seedling=="Y" & new=="Y") %>% 
+  mutate(year=as.factor(year)) %>% 
+  inner_join(agg.openess,by="Patch") %>% 
+  mutate(Patch=as.factor(Patch)) 
+
+
+
+```
+
+
+
+#Create a list that will contain demographic information for each year, patch and transition. I created two data bases
+
+* __demographic.output:__ 
+  + __year.2017__
+    + __## Patch:__ the two digits patch number 
+      + __data:__ raw data obtained from the original xlsx file. It was obtian from the data.all.years object
+      + __growth:__ it has the parameters of the model selected for growth
+      + __growth.matrix:__ matrix with growth probabilities
+      + __survival:__ it has the parameters of the model selected for survival
+      + __survival.matrix.2015:__ matrix with survival probabilities of the year 2015 (since we found significant differences between years, see below)
+      + __survival.matrix.2017:__ matrix with survival probabilities of the year 2017 (since we found significant differences between years, see below)
+      + __Pmatrix:__ the matrix containing the probablity of growth and survival according to size
+      + __data_growth_surv_fec:__
+      + __prob.repr.mod:__ the model of probability of reproduction according to size selected
+      + __num.inflor.model:__ the model of number of inflorescences according to size selected
+      + __num.bracts.model:__ the model of mean number of bracts per inflorescence according to size selected
+      + __number_flowers:__
+      + __fruits_per_flower:__
+      + __seeds_per_fruit:__
+      + __prob_germination:__
+      + __prob_surv_seedlings:__
+      + __Fmatrix:__ the matrix containing information of fecundity
+      + __lambda:__ population growth rate
+      
+      
+```{r,echo=F,include=F}
+
+#Create a list of the information that will go on each patch
+info.per.patch.list<-list(data=list(),data_growth_surv=list(),data_growth_surv_diff_canopy=list(),growth=list(),growth.matrix=list(),survival=list(),survival.matrix=list(),Pmatrix=list(),data_growth_surv_fec=list(),prob.repr.mod=list(),num.inflor.model=list(),num.bracts.model=list(),number_flowers=list(),fruits_per_flower=list(),seeds_per_fruit=list(),prob_germination=list(),prob_surv_seedlings=list(),seedling_size=list(),Fmatrix=list(),lambda=list())
+
+#Make a list of the patches I have
+#First I need to know which patches I have
+#patches.id<-unique(c(aggregate.height[[1]]$Patch,aggregate.height[[2]]$Patch,aggregate.height[[3]]$Patch))
+
+#Do a list
+#patches.id.split<-split(patches.id,f=patches.id)
+
+patches.id.split<-split(patches.info$Patch,f=patches.info$Patch)
+
+for (i in 1:nrow(patches.info)){
+  patches.id.split[[i]]<-info.per.patch.list
+  }
+
+#Creating an empty list of years with the information of patches and info per patches
+demographic.output<-list(year.2013=patches.id.split,year.2015=patches.id.split,year.2017=patches.id.split)
+
+
+#Put information on each slot when we have data for the 3 years
+for (i in 1:length(demographic.output)){
+  
+  for (k in 1:length(demographic.output[[i]])){
+    
+    #Data set with raw data of each patch
+  demographic.output[[i]][[k]]$data<-subset(data.all.years[[i]],data.all.years[[i]]$Patch==as.numeric(names(demographic.output[[i]][k])))
+  }
+}
+
+
+#Put information on each slot when we have data for transition between years (n=2)
+  
+for (i in 2:length(demographic.output)){
+  
+  for (k in 1:length(demographic.output[[i]])){
+    for (t in 2:length(growth.survival.data)){
+    #Data set with raw data of each patch
+      demographic.output[[i]][[k]]$data_growth_surv<-subset(growth.survival.data[[t]],as.numeric(as.character.factor(growth.survival.data[[t]]$Patch))==demographic.output[[i]][[k]]$data$Patch[1])
+      demographic.output[[i]][[k]]$data_growth_surv_diff_canopy<-subset(growth.survival.data[[t]],as.numeric(as.character.factor(growth.survival.data[[t]]$Patch))==demographic.output[[i]][[k]]$data$Patch[1])
+      
+    }
+  }
+}
+
+rm(patches.id.split,info.per.patch.list)
+
+```
+
+#Analysis of growth
+##Plot growth per transition per patch
+```{r,echo=F}
+#ANALYSIS OF GROWTH
+#Observe the growth data by patch
+library("lattice")
+library("latticeExtra")
+library("ggplot2")
+#Graph the log transformed data. If I want to graph the original data, use sizeOriginal and sizeNextOriginal
+for (i in 1:2){
+  growth.survival.data[[i]] %>% 
+    ggplot(aes(x=size,y=sizeNext)) +
+    geom_point() +
+    geom_smooth() +
+    facet_wrap(~Patch) -> p
+  print(p)
+
+}
+
+#Plot the growth per patch per year
+```
+
+
+#I have to prepare the data base for doing the GLMM. I will do one data base called data_growth_surv_diff_canopy with the information of all years alltogether. It has the following structure:
+
+* __Patch__
+* __mean_openess__
+* __percent_forest:__ the percent of forest cover in a 1 km radius around the focal patch
+* __elevation__
+* __patch_size__
+* __logpatch_size:__ logarithm of patch size
+ 
+
+```{r,echo=F,include=F}
+#Clean data base
+data_growth_surv_diff_canopy<-bind_rows(growth.survival.data[[1]],growth.survival.data[[2]]) %>% #Bind two years data base
+  mutate(diff=sizeNext-size) %>% #Obtain the growth rate
+  filter(!is.na(diff)) %>% #Take out any NA value
+  inner_join(agg.openess,by="Patch")# %>%  #Merge with canopy openess and patch information
+  #mutate(colour=if_else(year==2015,"red","black")) #Set colors to plot in pairs
+data_growth_surv_diff_canopy$year<-as.factor(data_growth_surv_diff_canopy$year)
+
+#
+
+#Obtain the difference
+#for (i in 2:length(demographic.output)){
+#  for (k in 1:nrow(patches.info)){
+
+    #demographic.output[[i]][[k]]$data_growth_surv_diff_canopy %>% 
+      #mutate(diff=demographic.output[[i]][[k]]$data_growth_surv_diff_canopy$sizeNext-demographic.output[[i]][[k]]$data_growth_surv_diff_canopy$size) %>% 
+      #filter(!is.na(diff)) %>% 
+      #inner_join(agg.openess,by="Patch")
+  #}
+  #}
+```
+
+#Analysis for growth rates using canopy openess. I selected the best model and put it in each patch in the slot called __growth__. Here I am having an error when I am selecting the GLMM model. I sent Helene the code to see fi she can help me. 
+
+```{r}
+
+#ANALYSIS OF GROWTH USING SIZET AND SIZET+1
+#Plot pairs
+pairs(data_growth_surv_diff_canopy[,c("sizeNext","size","logpatch_size","percent_forest","elevation","mean_openess")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth) #It would be great to add colors depending on the year
+
+
+#Model without random structure
+#mod.1<-gls(sizeNext ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(mean_openess)+year,method = "REML", data = data_growth_surv_diff_canopy)
+mod.1<-gls(sizeNext ~ size +  logpatch_size+percent_forest+elevation+mean_openess+year,method = "REML", data = data_growth_surv_diff_canopy)
+summary(mod.1)
+
+
+#GLMM nesting plot
+#mod.2<-lme(sizeNext~scale(size)+scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(mean_openess)+year,random = ~1 | Patch,data=data_growth_surv_diff_canopy,method="REML")
+mod.2<-lme(sizeNext~size+logpatch_size+percent_forest+elevation+mean_openess+year,random = ~1 | Patch,data=data_growth_surv_diff_canopy,method="REML")
+summary(mod.2)
+
+#GLMM nesting plot in patch. THIS MODEL IS NOT RUNNING, SO I WILL USE MODEL 2
+#mod.3<-lme(sizeNext~scale(size)+scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year,random = ~1 + sizeNext | Patch/Plot,data=data_growth_surv_diff_canopy,method="REML")
+#summary(mod.3)
+
+#The model with the lowest AIC is the one that includes patch/plot. I will use that for choosing a fixed part
+#GLMM without year
+#mod.4<-lme(sizeNext~scale(size)+scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(mean_openess),random = ~1  | Patch,data=data_growth_surv_diff_canopy,method="REML")
+mod.4<-lme(sizeNext~size+logpatch_size+percent_forest+elevation+mean_openess,random = ~1 | Patch,data=data_growth_surv_diff_canopy,method="REML")
+summary(mod.4)
+
+#GLMM without patch size
+#mod.5<-lme(sizeNext~scale(size)+scale(percent_forest)+scale(elevation)+scale(mean_openess),random = ~1  | Patch,data=data_growth_surv_diff_canopy,method="REML")
+mod.5<-lme(sizeNext~size+percent_forest+elevation+mean_openess,random = ~1 | Patch,data=data_growth_surv_diff_canopy,method="REML")
+summary(mod.5)
+
+#GLMM without canopy openess
+#mod.6<-lme(sizeNext~scale(size)+scale(percent_forest)+scale(elevation),random = ~1  | Patch,data=data_growth_surv_diff_canopy,method="REML")
+mod.6<-lme(sizeNext~size+percent_forest+elevation,random = ~1 | Patch,data=data_growth_surv_diff_canopy,method="REML")
+summary(mod.6)
+
+#GLMM without percent of forest
+#mod.7<-lme(sizeNext~scale(size)+scale(elevation),random = ~1  | Patch,data=data_growth_surv_diff_canopy,method="REML")
+mod.7<-lme(sizeNext~size+elevation,random = ~1 | Patch,data=data_growth_surv_diff_canopy,method="REML")
+summary(mod.7)
+
+#GLMM without elevation
+#mod.8<-lme(sizeNext~scale(size),random = ~1  | Patch,data=data_growth_surv_diff_canopy,method="REML")
+mod.8<-lme(sizeNext~size,random = ~1 | Patch,data=data_growth_surv_diff_canopy,method="REML")
+summary(mod.8)
+
+library("MuMIn")
+Weights(AIC(mod.4,mod.5,mod.6,mod.7,mod.8))
+
+#Select the  best model
+model.selected<-mod.8
+
+r.squaredGLMM(model.selected)
+
+
+#Extract the coefficients of each patch 
+for (i in 2:length(demographic.output)){
+  
+  for (k in 1:length(demographic.output[[i]])){
+    
+    demographic.output[[i]][[k]]$p.vec<-cbind(subset(coef(model.selected),row.names(coef(model.selected))==demographic.output[[i]][[k]]$data$Patch[1]),sd(resid(model.selected)))
+    #names(demographic.output[[i]][[k]]$p.vec)<-c("growth.int","growth.scale.size","growth.sd")
+    names(demographic.output[[i]][[k]]$p.vec)<-c("growth.int","growth.size","growth.sd")
+    
+  }
+}
+
+
+```
+
+```{r,echo=F,include=F}
+
+#MAKE THE GROWTH FUNCTION
+#}
+
+growth.function=function(xp, x, params){
+d = dnorm(xp, mean=params$growth.int + params$growth.size * x, sd=params$growth.sd)
+return(d)
+}
+
+
+#Remove objects that were used to select model
+rm(list=grep("mod.", ls(), value = TRUE))
+
+```
+
+```{r,echo=F}
+
+#print(xyplot(sizeNext~size,data=data_growth_surv_diff_canopy,main= "Growth")+layer(panel.smoother(..., col = "red")))
+
+#DO THIS LATER TO OBSERVE DISTRIBUTION OF SIZES BETWEEN PATCHES
+#plot(density(data_surv_canopy$sizeNext[!is.na(data_surv_canopy$sizeNext)]),xlab="Size(t+1)",main="Observed distribution of sizes")
+
+growth.fun.pred=function(x,params) {
+u=params$growth.int+params$growth.size*x
+return(u)
+}
+```
+
+
+```{r,echo=F}
+
+#Generate a sequence of sizes that go from the minimum to the maximum found in the data base
+xx=seq(min(data_growth_surv_diff_canopy$size,na.rm=T),max(data_growth_surv_diff_canopy$sizeNext,na.rm=T),by=.01)
+
+#Create a vector where the predicted values will go
+predicted.values<-as.numeric(1:length(xx))
+
+#Use the survival function to predict values
+for (i in 1:length(predicted.values)){
+  
+  predicted.values[i]<-growth.fun.pred(xx[i],demographic.output[[2]][[1]]$p.vec) #I am using a fixed p.vec since there are no differences in the formula between patches
+  
+}
+par(mfrow=c(1,1))
+ 
+jpeg("Graphs/Clump/growth.jpg",quality=100,width=1000,height=700)
+#Plot
+par(mar=c(6,6,3,2))
+plot(data_growth_surv_diff_canopy$size,data_growth_surv_diff_canopy$sizeNext,xlab="Log height at t",ylab="Log height at t+1",main="All years",cex=2,cex.axis=2,cex.lab=2,cex.main=2)
+lines(xx,predicted.values, col="red",lwd=3)
+abline(0,1,col="orange",lty=2,lwd=2)
+
+dev.off()
+
+rm(xx,growth.fun.pred,xx)
+
+#Plot with log number of shoots
+data_growth_surv_diff_canopy %>% ggplot(aes(x=size,y=sizeNext)) + geom_point(position = position_jitter(height = 0, width = 0.1), alpha = 0.5) + geom_smooth(method="lm",col="red") + geom_abline(intercept=0,slope=1,col="blue",linetype="dashed",size=1) +
+  xlab("Log number of shoots at time time t") +
+  ylab("Log number of shoots at time time t+1")
+ggsave("Graphs/Clump/growth log ggplot.jpg")
+
+#Plot with number of shoots
+data_growth_surv_diff_canopy %>% ggplot(aes(x=sizeOriginal,y=sizeNextOriginal)) +
+  geom_point(position = position_jitter(height = 0, width = 0.2), alpha = 0.5) +
+  geom_smooth(method="lm",col="red") +
+  geom_abline(intercept=0,slope=1,col="blue",linetype="dashed",size=1) +
+  xlab("Number of shoots at time time t") +
+  ylab("Number of shoots at time time t+1")
+ggsave("Graphs/Clump/growth ggplot.jpg")
+
+#Plot with number of shoots with less than 20 shoots
+data_growth_surv_diff_canopy %>% filter(sizeOriginal<20) %>% ggplot(aes(x=sizeOriginal,y=sizeNextOriginal)) +
+    geom_point(position = position_jitter(height = 0, width = 0.2), alpha = 0.5) +
+    geom_smooth(method="lm",col="red") +
+    geom_abline(intercept=0,slope=1,col="blue",linetype="dashed",size=1) +
+    xlab("Number of shoots at time time t") +
+    ylab("Number of shoots at time time t+1")
+ggsave("Graphs/Clump/growth ggplot less 20 shoots.jpg")
+```
+
+
+#Plot graphs of survival per patch per year
+```{r,echo=F}
+#CHUNK FOR SURVIVAL
+library("lattice")
+library("latticeExtra")
+#Plot
+for (i in 1:2){
+  growth.survival.data[[i]] %>% 
+    ggplot(aes(x=size,y=surv)) +
+    geom_point() +
+    geom_smooth(method = "glm", 
+    method.args = list(family = "binomial"), 
+    se = TRUE) +
+    facet_wrap(~Patch) ->p
+  print(p)
+  
+}
+
+
+```
+
+
+#Anlaysis of survival using canopy openess
+```{r}
+#ANALYSIS OF SURVIVAL USING CANOPY OPENESS
+#Clean data base
+data_surv_canopy<-bind_rows(growth.survival.data[[1]],growth.survival.data[[2]]) %>% #Bind two years data base
+  filter(!is.na(size)) %>% #Subset sizes that have NA
+  inner_join(agg.openess,by="Patch") %>%  #Merge with canopy openess and patch information
+  mutate(colour=if_else(year==2015,"red","black")) #Set colors to plot in pairs
+data_surv_canopy$year<-as.factor(data_surv_canopy$year)
+
+#Plot pairs
+pairs(data_surv_canopy[,c("surv","size","logpatch_size","percent_forest","elevation","mean_openess")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+
+
+#Model without random structure
+#mod.1<- glm(surv ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year, data = data_surv_canopy, family = binomial) #I do not know if this is ok since I am not using REML
+mod.1<- glm(surv ~ size +  logpatch_size+percent_forest+elevation+mean_openess+year, data = data_surv_canopy, family = binomial) #I do not know if this is ok since I am not using REML
+
+#mod.1<-gls(surv ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year,method = "REML", data = data_surv_canopy, family = binomial)
+summary(mod.1)
+
+#****I WAS READING HOW TO DO A glmm IN THE BOOK
+#GLMM with random effects of patch but with random intercept only.  I AM NOT USING REML, I DO NOT KNOW IF THAT IS CORRECT. 
+#mod.2 <- glmer(surv~scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+scale(size)+ year + (1 | Patch),data=data_surv_canopy, family = binomial)
+mod.2 <- glmer(surv~logpatch_size+percent_forest+elevation+mean_openess+size+ year + (1 | Patch),data=data_surv_canopy, family = binomial)#I have the following error Model failed to converge with max|grad| = 0.0015969 (tol = 0.001, component 1)
+#Model is nearly unidentifiable: very large eigenvalue
+# - Rescale variables?
+#Model is nearly unidentifiable: large eigenvalue ratio
+# - Rescale variables?
+summary(mod.2)
+
+#GLMM nesting plot in patch but with random intercept only. I AM NOT USING REML, I DO NOT KNOW IF THAT IS CORRECT. 
+#mod.3 <- glmer(surv~scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+scale(size)+ year + (1 | Patch/Plot),data=data_surv_canopy, family = binomial)
+mod.3 <- glmer(surv~logpatch_size+percent_forest+elevation+mean_openess+size+ year + (1 | Patch/Plot),data=data_surv_canopy, family = binomial) #Same erro as above
+
+#mod.3<-lme(surv~scale(size)+scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year,random = ~1 + surv | Patch/Plot,data=data_surv_canopy,method="REML", family = binomial)
+summary(mod.3)
+
+#GLMM of of randome effects with patch but using random slope and intercept. I AM NOT USING REML, I DO NOT KNOW IF THAT IS CORRECT. 
+#mod.4 <- glmer(surv~scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+scale(size)+ year + (1 + surv | Patch),data=data_surv_canopy, family = binomial)
+#summary(mod.4)
+
+#GLMM of of randome effects with plot nested in patch but using random slope and intercept. I AM NOT USING REML, I DO NOT KNOW IF THAT IS CORRECT. 
+#mod.5 <- glmer(surv~scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+scale(size)+ year + (1 + surv | Patch/Plot),data=data_surv_canopy, family = binomial)
+#summary(mod.5)
+
+
+#I WILL CONTINUE WITH MODEL WITH RANDOM INTERCEPT WITH PLOT NESTED IN PATCH. HOWEVER, THE MODELS WITH RANDOM INTERCEPTS AND SLOPES HAVE A LOWER AIC BUT THERE IS AN ERROR THAT I DO NOT KNOW WHAT DOES IT MEAN
+#I will take out canopy openess
+#mod.6 <- glmer(surv~scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(size)+ year + (1 | Patch/Plot),data=data_surv_canopy, family = binomial)
+mod.6 <- glmer(surv~logpatch_size+percent_forest+elevation+size+ year + (1 | Patch/Plot),data=data_surv_canopy, family = binomial) #I have convergence error
+summary(mod.6)
+
+#I will take out patch size
+#mod.7 <- glmer(surv~scale(percent_forest)+scale(elevation)+scale(size)+ year + (1 | Patch/Plot),data=data_surv_canopy, family = binomial)
+mod.7 <- glmer(surv~percent_forest+elevation+size+ year + (1 | Patch/Plot),data=data_surv_canopy, family = binomial) #I have convergence error
+summary(mod.7)
+
+#I will take out percent of forest
+#mod.8 <- glmer(surv~scale(elevation)+scale(size)+ year + (1 | Patch/Plot),data=data_surv_canopy, family = binomial)
+mod.8 <- glmer(surv~elevation+size+ year + (1 | Patch/Plot),data=data_surv_canopy, family = binomial) #I have convergence error
+summary(mod.8)
+
+#Elevation is marginally 
+#mod.9 <- glmer(surv~scale(size)+ year + (1 | Patch/Plot),data=data_surv_canopy, family = binomial)
+mod.9 <- glmer(surv~size+ year + (1 | Patch/Plot),data=data_surv_canopy, family = binomial) #I have convergence error
+summary(mod.9)
+
+library("MuMIn")
+Weights(AIC(mod.6,mod.7,mod.8,mod.9))
+
+
+#Select the  best model
+#model.selected<-mod.8
+
+
+###*****I WILL USE THE FOLLOWING MODEL SINCE I DO NOT KNOW HOW TO EXTRACT THE INFORMATION FORM A MODEL THAT HAS A RANDOM FACTOR PATCH/PLOT, SO I WILL USE A MODEL WITH RANDOM FACTOR AS PLOT ONLY
+mod.6 <- glmer(surv~size+ year + 
+                 (1 | Patch),
+               data=data_surv_canopy, 
+               family = binomial)
+summary(mod.6)
+
+model.selected<-mod.6
+
+
+#print(xyplot(surv~size|year,data=data_surv_canopy,main= "Survival")+layer(panel.smoother(..., col = "red")))
+
+#print(xyplot(surv~sizeOriginal|year,data=data_surv_canopy,main= "Survival")+layer(panel.smoother(..., col = "red")))
+
+```
+
+
+```{r,include=F}
+#MAKE THE SURVIVAL FUNCTION
+
+#Store the coefficients by year because it was significant
+#Year 2015
+for (i in 2:2){
+  
+  for (k in 1:length(demographic.output[[i]])){
+    
+    demographic.output[[i]][[k]]$survival<-subset(coef(model.selected)$Patch[,-3],as.numeric(substr(row.names(coef(model.selected)$Patch[,-3]),1,2))==demographic.output[[i]][[k]]$data$Patch[1])
+    #names(demographic.output[[i]][[k]]$survival)<-c("surv.int","surv.scale.size")
+    names(demographic.output[[i]][[k]]$survival)<-c("surv.int","surv.size") #Here the vector i going to differ in length compared to the vector in 2017 since I do not have a column dor year 2015 since is the group that is being compared in the regression as dummy variable
+    demographic.output[[i]][[k]]$p.vec<-cbind(demographic.output[[i]][[k]]$p.vec,demographic.output[[i]][[k]]$survival)
+    
+    demographic.output[[i]][[k]]$survival<-NULL
+    
+  }
+}
+
+
+#Function for year 2015
+survival.fun.2015=function(x,params) {
+#u=exp(params$surv.int+params$surv.scale.size*x)
+  u=exp(params$surv.int+params$surv.size*x)
+return(u/(1+u))
+}
+
+#Year 2017
+for (i in 3:3){
+  
+  for (k in 1:length(demographic.output[[i]])){
+    
+    demographic.output[[i]][[k]]$survival<-subset(coef(model.selected)$Patch,as.numeric(substr(row.names(coef(model.selected)$Patch),1,2))==demographic.output[[i]][[k]]$data$Patch[1])
+    #names(demographic.output[[i]][[k]]$survival)<-c("surv.int","surv.scale.size","surv.year.2017")
+    names(demographic.output[[i]][[k]]$survival)<-c("surv.int","surv.size","surv.year.2017")#Here the vector i going to differ in length compared to the vector in 2017 since I do not have a column dor year 2015 since is the group that is being compared in the regression as dummy variable
+    demographic.output[[i]][[k]]$p.vec<-cbind(demographic.output[[i]][[k]]$p.vec,demographic.output[[i]][[k]]$survival)
+    
+    demographic.output[[i]][[k]]$survival<-NULL
+  }
+}
+
+
+#Function for year 2017
+survival.fun.2017=function(x,params) {
+u=exp(params$surv.int+params$surv.size*x+params$surv.year.2017)
+return(u/(1+u))
+}
+
+
+#Based on AIC, model 8 is the best one.
+
+#jpeg("Graphs/Clump/survival.jpg",quality=100,width=1000,height=700)
+#par(mar=c(5,6,5,2))
+#plot(data_surv_canopy$size,data_surv_canopy$surv,xlab="Log plant height",ylab="Probability of survival",cex.axis=3,cex.lab=3,cex=3,cex.main=3,main="Survival")
+
+#par(new=T)
+#Plot regression line
+#abline(mod.6$coefficients$fixed[1:2],col="red",lwd=3)
+#dev.off()
+
+
+#Remove objects that were used to select model
+rm(list=grep("mod.", ls(), value = TRUE))
+```
+
+```{r,echo=F}
+#I will predict survival values first for year 2015 and then for 2017
+
+#Generate a sequence of sizes that go from the minimum to the maximum found in the data base
+xx=seq(min(data_surv_canopy$size,na.rm=T),max(data_surv_canopy$sizeNext,na.rm=T),by=.01)
+
+#Create a vector where the predicted values will go
+predicted.values.2015<-as.numeric(1:length(xx))
+
+#Use the survival function to predict values
+for (i in 1:length(predicted.values.2015)){
+  
+  predicted.values.2015[i]<-survival.fun.2015(xx[i],demographic.output[[2]][[1]]$p.vec) #I am using a fixed p.vec since there are no differences in the formula between patches
+  
+}
+par(mfrow=c(1,2))
+ 
+#Plot
+plot(subset(data_surv_canopy,data_surv_canopy$year==2015)$size,jitter(subset(data_surv_canopy,data_surv_canopy$year==2015)$surv),xlab="Size (Log height (cm))",ylab="Probability of survival",main="Year 2013-2015")
+lines(xx,predicted.values.2015, col="red",lwd=3)
+abline(h=1,col="yellow",lty=2,lwd=2)
+
+
+#Create a vector where the predicted values will go
+predicted.values.2017<-as.numeric(1:length(xx))
+
+#Use the survival function to predict values
+for (i in 1:length(predicted.values.2017)){
+  
+  predicted.values.2017[i]<-survival.fun.2017(xx[i],demographic.output[[3]][[1]]$p.vec) 
+  
+}
+ 
+#Plot
+plot(subset(data_surv_canopy,data_surv_canopy$year==2017)$size,jitter(subset(data_surv_canopy,data_surv_canopy$year==2017)$surv),xlab="Size (Log height (cm))",ylab="Probability of survival",main="Year 2015-2017")
+lines(xx,predicted.values.2017, col="red",lwd=3)
+abline(h=1,col="yellow",lty=2,lwd=2)
+
+#plot both years
+
+jpeg("Graphs/Clump/survival.jpg",quality=100,width=1000,height=700)
+par(mfrow=c(1,1),mar=c(6,6,3,2))
+plot(data_surv_canopy$size,jitter(data_surv_canopy$surv),xlab="Log height",ylab="Probability of survival",main="All years",cex=2,cex.axis=2,cex.lab=2,cex.main=2)
+
+#plot(data_surv_canopy$size,jitter(data_surv_canopy$surv),xlab="Size (Log height (cm))",ylab="Size next (Log height (cm))",main="All years",col=adjustcolor(data_surv_canopy$year,alpha=0.6))
+
+lines(xx,predicted.values.2015, col="red",lwd=3)
+lines(xx,predicted.values.2017, col="cyan",lwd=3)
+#abline(h=1,col="darkgreen",lty=2,lwd=2)
+legend("bottomright",legend=c("2015","2017"),col=c("red","cyan"),bty="n",lty=1,lwd=2,cex=2)
+
+dev.off()
+
+plot(density(data_surv_canopy$sizeNext[!is.na(data_surv_canopy$sizeNext)]),xlab="Size(t+1)",
+main="Observed distribution of sizes")
+
+#Remove objects I will not use
+rm(predicted.values.2017,predicted.values.2015,xx)
+
+data_surv_canopy %>% 
+  ggplot(aes(x=size,y=surv),group=year)  +
+  geom_point(position=position_jitter(width=0.1,height=0.1),alpha=0.5) +
+  geom_smooth(method="glm",method.args=list(family="binomial"),se=T,aes(group=year,color=year)) +
+  geom_hline(yintercept=1,linetype="dashed",col="red",size=2) +
+  xlab("Log number of shoots") +
+  ylab("Probability of survival")
+ggsave("Graphs/Clump/survival by year same plot.jpg")
+
+data_surv_canopy %>% 
+  ggplot(aes(x=size,y=surv))  +
+  geom_point(position=position_jitter(width=0.1,height=0.1),alpha=0.5) +
+  geom_smooth(method="glm",method.args=list(family="binomial"),se=T) +
+  geom_hline(yintercept=1,linetype="dashed",col="red",size=2) + 
+  facet_wrap(~year) +
+  xlab("Log number of shoots") +
+  ylab("Probability of survival")
+ggsave("Graphs/Clump/survival by year different plots.jpg")
+
+
+
+```
+
+
+
+#Add to p.vec the information of the covariates (log patch size, mean openess, percent of forest, elevation)
+
+```{r,include=F}
+    #scale variables. If I am not scaling the explanatory variables, I do not need this part of the code
+#scaled.agg.openess<-agg.openess
+
+#scaled.agg.openess$mean_openess<-100-scaled.agg.openess$mean_openess
+
+    #for (i in 2:ncol(agg.openess)){
+    
+      
+        
+    #scaled.agg.openess[,i]<-scale(agg.openess[,i])
+    
+    #}
+
+
+for (i in 2:length(demographic.output)){
+  
+  for (k in 1:length(demographic.output[[i]])){
+    
+    #Substrating the rows that have information for each patch. I am taking out the first row, wich indicates the patch number
+    #demographic.output[[i]][[k]]$covariates<-subset(scaled.agg.openess,scaled.agg.openess$Patch==demographic.output[[i]][[k]]$data$Patch[1])[,-1]
+    demographic.output[[i]][[k]]$covariates<-subset(agg.openess,agg.openess$Patch==demographic.output[[i]][[k]]$data$Patch[1])[,-1]
+
+    #Naming the variables
+    names(demographic.output[[i]][[k]]$covariates)<-c("cov.mean.openess","cov.percent.forest","cov.elevation","cov.pathc.size","cov.logpatch.size")
+    
+    #Binding both data frames
+    demographic.output[[i]][[k]]$p.vec<-cbind(demographic.output[[i]][[k]]$covariates,demographic.output[[i]][[k]]$p.vec)
+    
+    #Deleting covariates data frame
+    demographic.output[[i]][[k]]$covariates<-NULL
+    
+  }
+}
+
+```
+
+```{r,echo=F}
+#Plot histogram of individuals by size according to their reproduction status
+library("ggplot2")
+for (i in 1:2){
+  
+print(ggplot(aggregate.height.reproduction[[i]], aes(x = size.original, color = offspringNext, fill=offspringNext))+
+  labs(x="Height (cm)",y="Frequency") +
+  geom_histogram(position = "identity", bins = 100)+
+  facet_wrap(~ Patch, ncol = 4) +
+    scale_fill_discrete(name = "Reproductive status",  labels = c("Non-reproductive", "Reproductive")) +
+  scale_colour_discrete(name = "Reproductive status",  labels = c("Non-reproductive", "Reproductive"))
+    + theme(legend.position="top",
+            strip.text.x = element_text(size = 8)))
+  
+ggsave(paste("Graphs/Clump/Size structure by reproductive status ",ifelse(i==1,2013,2015),".jpg",sep=""))
+}
+```
+
+
+```{r,include=F}
+#I was doing this code for cutting individuals for specific sizes
+#aggregate.height.reproduction[[i]]$cuts<-cut(aggregate.height.reproduction[[i]]$size, seq(0,ceiling(max(aggregate.height.reproduction[[i]]$size)),0.25))
+
+#aggregate(aggregate.height.reproduction[[i]]$size,by=list(Patch=aggregate.height.reproduction[[i]]$Patch,Plot=aggregate.height.reproduction[[i]]$Plot,Category=aggregate.height.reproduction[[i]]$cuts),FUN=length)
+
+#aggregate.height.reproduction[[i]]$cuts<-NULL
+```
+
+
+
+```{r}
+#Plot histogram of individuals by size according to their reproduction status
+for (i in 1:3){
+p1<-ggplot(aggregate.height.reproduction[[i]], aes(x = size))+
+  labs(x="Log height",y="Frequency") +
+  geom_histogram(aes(color = offspringNext,fill=offspringNext),
+                position = "identity", bins = 30)+
+  facet_wrap(~ Patch, ncol = 4) +
+    scale_fill_discrete(name = "Reproductive status",  labels = c("Non-reproductive", "Reproductive")) +
+  scale_colour_discrete(name = "Reproductive status", labels = c("Non-reproductive", "Reproductive")) +
+  ggtitle(aggregate.height.reproduction[[i]]$year[1]) +
+  theme(plot.title = element_text(hjust = 0.5))
+p1
+  
+ggsave(paste("Graphs/Clump/Size structure by patch year ",aggregate.height.reproduction[[i]]$year[1],".jpg",sep=""))
+}
+
+
+for (i in unique(data_reproduction_analysis$Patch)){
+  
+  p<-data_reproduction_analysis %>% 
+    filter(Patch==i) %>% 
+    ggplot(aes(x = size)) +
+  geom_histogram(aes(color = offspringNext,fill=offspringNext),
+                position = "identity", bins = 10)+ 
+  facet_wrap(~ year, ncol = 3) +
+    scale_fill_discrete(name = "Reproductive status",  labels = c("Non-reproductive", "Reproductive")) +
+  scale_colour_discrete(name = "Reproductive status", labels = c("Non-reproductive", "Reproductive")) +
+  ggtitle(paste("Patch ",i,sep="")) +
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(x="Log height",y="Frequency")
+print(p)
+
+ggsave(paste("Graphs/Clump/Size structure by patch and year id patch ",i,".jpg",sep=""))
+}
+
+
+
+
+for (i in 1:3){
+  p1<-aggregate.height.reproduction[[i]] %>% 
+    filter(fec1==1) %>% 
+    ggplot(aes(x = size))+
+  labs(x="Log height",y="Frequency") +
+  geom_histogram(aes(color = offspringNext,fill=offspringNext),
+                position = "identity", bins = 30)+
+  facet_wrap(~ Patch, ncol = 4) +
+  ggtitle(paste("Reproductive individuals in year ",aggregate.height.reproduction[[i]]$year[1],sep="")) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+    theme(legend.position = "none")
+  p1
+ggsave(paste("Graphs/Clump/Size structure of reproductive individuals by patch year ",aggregate.height.reproduction[[i]]$year[1],".jpg",sep=""))
+}
+
+```
+
+```{r,include=F}
+#Do a data frame with density of reproductive individuals according to plot
+
+#Estimate density for year 2013
+for (i in 1:1){
+  #Not all patches have reproductive individuals, so if there is a patch with no reproductive individuals then it will not be aggregated. Therefore, I will first produce a data frame with all the patches that were sampled in a specific year so that I can merge it with the data frame of agregated individuals per year
+all.patches<-data.frame(Patch=unique(aggregate.height.reproduction[[i]]$Patch))
+
+#Binding the data frame three times since each patch has 3 plots
+all.patches<-rbind(all.patches,all.patches,all.patches)
+
+#Assigning plot number to each patch
+all.patches$Plot<-rep(1:3,each=20)
+
+#Subset individuals that are reproductive
+  density.reproductive<-subset(aggregate.height.reproduction[[i]],aggregate.height.reproduction[[i]]$fec1==1)
+  
+  #Agregate by patch and plot
+  density.rep.2013<-aggregate(density.reproductive$size,by=list(Patch=density.reproductive$Patch,Plot=density.reproductive$Plot),FUN=length)
+  
+  #Rename columns
+colnames(density.rep.2013)[3]<-"Counts"
+
+#Merge data frame with complet patches and plots with the aggregate of reproductive individuals
+density.rep.2013<-merge(density.rep.2013,all.patches,by=c("Patch","Plot"),all=T)
+
+#Replace any NA with 0's
+density.rep.2013[is.na(density.rep.2013)] <- 0
+
+#Estimate density. In 2013 plots where 14*14 m and they were reduced to 10*10 m plots
+density.rep.2013$density<-density.rep.2013$Counts/(10*10)
+
+#Column for labeling year
+density.rep.2013$year<-2013
+
+}
+
+#Estimate density for year 2015
+for (i in 2:2){
+  #Not all patches have reproductive individuals, so if there is a patch with no reproductive individuals then it will not be aggregated. Therefore, I will first produce a data frame with all the patches that were sampled in a specific year so that I can merge it with the data frame of agregated individuals per year
+all.patches<-data.frame(Patch=unique(aggregate.height.reproduction[[i]]$Patch))
+
+#Binding the data frame three times since each patch has 3 plots
+all.patches<-rbind(all.patches,all.patches,all.patches)
+
+#Assigning plot number to each patch
+all.patches$Plot<-rep(1:3,each=20)
+
+#Subset individuals that are reproductive
+  density.reproductive<-subset(aggregate.height.reproduction[[i]],aggregate.height.reproduction[[i]]$fec1==1)
+  
+  #Agregate by patch and plot
+  density.rep.2015<-aggregate(density.reproductive$size,by=list(Patch=density.reproductive$Patch,Plot=density.reproductive$Plot),FUN=length)
+  
+  #Rename columns
+colnames(density.rep.2015)[3]<-"Counts"
+
+#Merge data frame with complet patches and plots with the aggregate of reproductive individuals
+density.rep.2015<-merge(density.rep.2015,all.patches,by=c("Patch","Plot"),all=T)
+
+#Replace any NA with 0's
+density.rep.2015[is.na(density.rep.2015)] <- 0
+
+#Estimate density. In 2013 plots where 14*14 m and they were reduced to 10*10 m plots
+density.rep.2015$density<-density.rep.2015$Counts/(10*10)
+
+#Column for labeling year
+density.rep.2015$year<-2015
+
+}
+
+
+#Estimate density for year 2017
+for (i in 3:3){
+  #Not all patches have reproductive individuals, so if there is a patch with no reproductive individuals then it will not be aggregated. Therefore, I will first produce a data frame with all the patches that were sampled in a specific year so that I can merge it with the data frame of agregated individuals per year
+all.patches<-data.frame(Patch=unique(aggregate.height.reproduction[[i]]$Patch))
+
+#Binding the data frame three times since each patch has 3 plots
+all.patches<-rbind(all.patches,all.patches,all.patches)
+
+#Assigning plot number to each patch
+all.patches$Plot<-rep(1:3,each=20)
+
+#Subset individuals that are reproductive
+  density.reproductive<-subset(aggregate.height.reproduction[[i]],aggregate.height.reproduction[[i]]$fec1==1)
+  
+  #Agregate by patch and plot
+  density.rep.2017<-aggregate(density.reproductive$size,by=list(Patch=density.reproductive$Patch,Plot=density.reproductive$Plot),FUN=length)
+  
+  #Rename columns
+colnames(density.rep.2017)[3]<-"Counts"
+
+#Merge data frame with complet patches and plots with the aggregate of reproductive individuals
+density.rep.2017<-merge(density.rep.2017,all.patches,by=c("Patch","Plot"),all=T)
+
+#Replace any NA with 0's
+density.rep.2017[is.na(density.rep.2017)] <- 0
+
+#Estimate density. In 2013 plots where 14*14 m and they were reduced to 10*10 m plots
+density.rep.2017$density<-density.rep.2017$Counts/(10*10)
+
+#Column for labeling year
+density.rep.2017$year<-2017
+
+}
+
+#Bind 2013 and 2015 data frames
+density.reproductive<-rbind(density.rep.2013,density.rep.2015,density.rep.2017)
+
+#Merge with environmental variables information
+density.reproductive<-density.reproductive %>% 
+inner_join(agg.openess,by="Patch")# %>%  #Merge with canopy 
+density.reproductive$year<-as.factor(density.reproductive$year)
+
+
+rm(density.rep.2013,density.rep.2015,density.rep.2017)
+```
+
+
+
+
+```{r,echo=F}
+#Plot pairs
+pairs(density.reproductive[,c("density","logpatch_size","percent_forest","elevation","mean_openess","year")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth) #It would be great to add colors depending on the year
+
+#Transform variable. IT IS NOT NORMALLY DISTRIBUTED BUT I WILL CONTINUE WITH THE TRANSFORMED DATA
+density.reproductive$log.density<-log(density.reproductive$density+1)
+
+#Plot
+pairs(density.reproductive[,c("log.density","logpatch_size","percent_forest","elevation","mean_openess","year")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+
+#Model without random structure
+mod.1<-gls(log.density ~ logpatch_size + percent_forest + elevation + mean_openess + year,method = "REML", data = density.reproductive)
+summary(mod.1)
+
+
+#GLMM nesting patch
+mod.2<-lme(log.density ~ logpatch_size + percent_forest + elevation + mean_openess + year,random = ~1 | Patch,data=density.reproductive,method="REML")
+summary(mod.2)
+
+#Without patch size
+mod.3<-lme(log.density ~ percent_forest + elevation + mean_openess + year,random = ~1 | Patch,data=density.reproductive,method="REML")
+summary(mod.3)
+
+#Without percent forest
+mod.4<-lme(log.density ~ elevation + mean_openess + year,random = ~1 | Patch,data=density.reproductive,method="REML")
+summary(mod.4)
+
+#Without elevation
+mod.5<-lme(log.density ~ mean_openess + year,random = ~1 | Patch,data=density.reproductive,method="REML")
+summary(mod.5)
+
+#Without canopy openess
+mod.6<-lme(log.density ~ year,random = ~1 | Patch,data=density.reproductive,method="REML")
+summary(mod.6)
+
+#WITH PLOT 10X10 ACTIVE, ELEVATION IS MARGINALLY SIGNIFICANT P=0.07 BUT THERE ARE STILL DIFFERENCES BETWEEN YEARS
+
+jpeg("Graphs/Clump/Density reproductive individuals.jpg",quality=100,width=1000,height=700)
+#Plot with line
+par(mar=c(6,6,3,2))
+plot(density.reproductive$year,density.reproductive$log.density,xlab="Year",ylab="Log density (ind/m2)",main="Density of reproductive individuals",cex.lab=2,cex.axis=2,cex.main=2,cex=2)
+#abline(mod.6$coefficients$fixed,col="red")
+
+dev.off()
+rm(list=grep("mod.", ls(), value = TRUE))
+```
+
+
+
+```{r,include=F}
+#Do a data frame with density of reproductive individuals according to Patch
+
+#Estimate density for year 2013
+for (i in 1:1){
+  #Not all patches have reproductive individuals, so if there is a patch with no reproductive individuals then it will not be aggregated. Therefore, I will first produce a data frame with all the patches that were sampled in a specific year so that I can merge it with the data frame of agregated individuals per year
+all.patches<-data.frame(Patch=unique(aggregate.height.reproduction[[i]]$Patch))
+
+
+
+#Subset individuals that are reproductive
+  density.reproductive<-subset(aggregate.height.reproduction[[i]],aggregate.height.reproduction[[i]]$fec1==1)
+  
+  #Agregate by patch and plot
+  density.rep.2013<-aggregate(density.reproductive$size,by=list(Patch=density.reproductive$Patch),FUN=length)
+  
+  #Rename columns
+colnames(density.rep.2013)[2]<-"Counts"
+
+#Merge data frame with complet patches and plots with the aggregate of reproductive individuals
+density.rep.2013<-merge(density.rep.2013,all.patches,by="Patch",all=T)
+
+#Replace any NA with 0's
+density.rep.2013[is.na(density.rep.2013)] <- 0
+
+#Estimate density. In 2013 plots where 14*14 m and they were reduced to 10*10 m plots
+density.rep.2013$density<-density.rep.2013$Counts/(10*10)*3
+
+#Column for labeling year
+density.rep.2013$year<-2013
+
+}
+
+#Estimate density for year 2015
+for (i in 2:2){
+
+#Subset individuals that are reproductive
+  density.reproductive<-subset(aggregate.height.reproduction[[i]],aggregate.height.reproduction[[i]]$fec1==1)
+  
+  #Agregate by patch and plot
+  density.rep.2015<-aggregate(density.reproductive$size,by=list(Patch=density.reproductive$Patch),FUN=length)
+  
+  #Rename columns
+colnames(density.rep.2015)[2]<-"Counts"
+
+#Merge data frame with complet patches and plots with the aggregate of reproductive individuals
+density.rep.2015<-merge(density.rep.2015,all.patches,by="Patch",all=T)
+
+#Replace any NA with 0's
+density.rep.2015[is.na(density.rep.2015)] <- 0
+
+#Estimate density. In 2013 plots where 14*14 m and they were reduced to 10*10 m plots
+density.rep.2015$density<-density.rep.2015$Counts/(10*10)*3
+
+#Column for labeling year
+density.rep.2015$year<-2015
+
+}
+
+
+#Estimate density for year 2017
+for (i in 3:3){
+
+
+#Subset individuals that are reproductive
+  density.reproductive<-subset(aggregate.height.reproduction[[i]],aggregate.height.reproduction[[i]]$fec1==1)
+  
+  #Agregate by patch and plot
+  density.rep.2017<-aggregate(density.reproductive$size,by=list(Patch=density.reproductive$Patch),FUN=length)
+  
+  #Rename columns
+colnames(density.rep.2017)[2]<-"Counts"
+
+#Merge data frame with complet patches and plots with the aggregate of reproductive individuals
+density.rep.2017<-merge(density.rep.2017,all.patches,by="Patch",all=T)
+
+#Replace any NA with 0's
+density.rep.2017[is.na(density.rep.2017)] <- 0
+
+#Estimate density. In 2013 plots where 14*14 m and they were reduced to 10*10 m plots
+density.rep.2017$density<-density.rep.2017$Counts/(10*10)*3
+
+#Column for labeling year
+density.rep.2017$year<-2017
+
+}
+
+#Bind 2013 and 2015 data frames
+density.reproductive<-rbind(density.rep.2013,density.rep.2015,density.rep.2017)
+
+#Merge with environmental variables information
+density.reproductive<-density.reproductive %>% 
+inner_join(agg.openess,by="Patch")# %>%  #Merge with canopy 
+density.reproductive$year<-as.factor(density.reproductive$year)
+
+density.reproductive %>% 
+  mutate(year=as.factor(year)) %>% 
+  ggplot(aes(x=Patch,y=density,fill=year)) +
+  geom_bar(stat="identity", position=position_dodge(),width=0.5)+
+    scale_fill_grey() +
+  ylab("Density of reproductive individuals (ind/m2)")
+ggsave("Graphs/Clump/Density reproductive individuals by patch and year barplot.jpg")
+
+rm(density.rep.2013,density.rep.2015,density.rep.2017)
+```
+
+
+```{r,include=F}
+#Do a data frame with density according to plot
+
+#Estimate density for year 2013
+for (i in 1:1){
+
+  #Agregate density according to patch and plot
+  density.2013<-aggregate(aggregate.height.reproduction[[i]]$size,by=list(Patch=aggregate.height.reproduction[[i]]$Patch,Plot=aggregate.height.reproduction[[i]]$Plot),FUN=length)
+  
+  #Rename columns
+colnames(density.2013)[3]<-"Counts"
+
+#Estimate density. In 2013 plot were 14*14 in size, in 2015 they were reduced to 10*10
+density.2013$density<-density.2013$Counts/(10*10)
+
+#Put year variable
+density.2013$year<-2013
+
+}
+
+#Estimate density for year 2015
+for (i in 2:2){
+ #Agregate density according to patch and plot
+  density.2015<-aggregate(aggregate.height.reproduction[[i]]$size,by=list(Patch=aggregate.height.reproduction[[i]]$Patch,Plot=aggregate.height.reproduction[[i]]$Plot),FUN=length)
+
+  #Rename columns
+  colnames(density.2015)[3]<-"Counts"
+  
+  #Estimate density. In 2013 plot were 14*14 in size, in 2015 they were reduced to 10*10
+density.2015$density<-density.2015$Counts/(10*10)
+
+#Put year variable
+density.2015$year<-2015
+
+}
+
+
+#Estimate density for year 2017
+for (i in 3:3){
+ #Agregate density according to patch and plot
+  density.2017<-aggregate(aggregate.height.reproduction[[i]]$size,by=list(Patch=aggregate.height.reproduction[[i]]$Patch,Plot=aggregate.height.reproduction[[i]]$Plot),FUN=length)
+
+  #Rename columns
+  colnames(density.2017)[3]<-"Counts"
+  
+  #Estimate density. In 2013 plot were 14*14 in size, in 2015 they were reduced to 10*10
+density.2017$density<-density.2017$Counts/(10*10)
+
+#Put year variable
+density.2017$year<-2017
+
+}
+
+#Bind 2013 and 2015 data frames
+density<-rbind(density.2013,density.2015,density.2017)
+
+#Merge with environmental variables information
+density<-density %>% 
+inner_join(agg.openess,by="Patch")# %>%  #Merge with canopy 
+density$year<-as.factor(density$year)
+
+rm(density.2013,density.2015)
+```
+
+
+```{r,echo=F}
+#Plot pairs
+pairs(density[,c("density","logpatch_size","percent_forest","elevation","mean_openess","year")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth) #It would be great to add colors depending on the year
+
+#Log transform density
+density$log.density<-log(density$density)
+
+pairs(density[,c("log.density","logpatch_size","percent_forest","elevation","mean_openess","year")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth) #It would be great to add colors depending on the year
+
+#Model without random structure
+mod.1<-gls(log.density ~ logpatch_size + percent_forest + elevation + mean_openess + year,method = "REML", data = density)
+summary(mod.1)
+
+
+#GLMM nesting patch
+mod.2<-lme(log.density ~ logpatch_size + percent_forest + elevation + mean_openess + year,random = ~1 | Patch,data=density,method="REML")
+summary(mod.2)
+
+#Without mean openess
+mod.3<-lme(log.density ~ logpatch_size + percent_forest + elevation + year,random = ~1 | Patch,data=density,method="REML")
+summary(mod.3)
+
+#Without percent forest
+mod.4<-lme(log.density ~ logpatch_size + elevation + year,random = ~1 | Patch,data=density,method="REML")
+summary(mod.4)
+
+#Without patch size
+mod.5<-lme(log.density ~ elevation + year,random = ~1 | Patch,data=density,method="REML")
+summary(mod.5)
+
+
+p1<-density %>%
+  ggplot(aes(x=elevation,y=log.density)) + 
+  geom_point() +
+  geom_smooth(method="lm",col="red") +
+  xlab("Elevation (m.a.s.l.)") +
+  ylab("Log density (ind/m2)") +
+  geom_text(x=1510, y=0.3, label="a)",fontface="bold")
+ggsave("Graphs/Clump/Density all individuals vs elevation.jpg")
+
+p2<-density %>%
+  ggplot(aes(x=year,y=log.density)) +
+  geom_boxplot() +
+  xlab("Year") +
+  ylab("Log density (ind/m2)") +
+  geom_text(x=2.5, y=0.3, label="b)",fontface="bold")
+ggsave("Graphs/Clump/Density all individuals vs year.jpg")
+
+library("gridExtra")
+p3<-grid.arrange(p1, p2, ncol=2)
+ggsave("Graphs/Clump/Density all individuals vs elevation and year.jpg",plot=p3)
+
+
+rm(list=grep("mod.", ls(), value = TRUE))
+rm(p1,p2,p3)
+
+```
+
+
+
+```{r,include=F}
+#Do a data frame with density according to Patch
+
+#Estimate density for year 2013
+for (i in 1:1){
+
+  #Agregate density according to patch and plot
+  density.2013<-aggregate(aggregate.height.reproduction[[i]]$size,by=list(Patch=aggregate.height.reproduction[[i]]$Patch),FUN=length)
+  
+  #Rename columns
+colnames(density.2013)[2]<-"Counts"
+
+#Estimate density. In 2013 plot were 14*14 in size, in 2015 they were reduced to 10*10
+density.2013$density<-density.2013$Counts/(10*10)*3
+
+#Put year variable
+density.2013$year<-2013
+
+}
+
+#Estimate density for year 2015
+for (i in 2:2){
+ #Agregate density according to patch and plot
+  density.2015<-aggregate(aggregate.height.reproduction[[i]]$size,by=list(Patch=aggregate.height.reproduction[[i]]$Patch),FUN=length)
+
+  #Rename columns
+  colnames(density.2015)[2]<-"Counts"
+  
+  #Estimate density. In 2013 plot were 14*14 in size, in 2015 they were reduced to 10*10
+density.2015$density<-density.2015$Counts/(10*10)*3
+
+#Put year variable
+density.2015$year<-2015
+
+}
+
+
+#Estimate density for year 2015
+for (i in 3:3){
+ #Agregate density according to patch and plot
+  density.2017<-aggregate(aggregate.height.reproduction[[i]]$size,by=list(Patch=aggregate.height.reproduction[[i]]$Patch),FUN=length)
+
+  #Rename columns
+  colnames(density.2017)[2]<-"Counts"
+  
+  #Estimate density. In 2013 plot were 14*14 in size, in 2015 they were reduced to 10*10
+density.2017$density<-density.2017$Counts/(10*10)*3
+
+#Put year variable
+density.2017$year<-2017
+
+}
+
+#Bind 2013 and 2015 data frames
+density.patch<-rbind(density.2013,density.2015,density.2017)
+
+density.patch %>% 
+  mutate(year=as.factor(year)) %>% 
+  ggplot(aes(x=Patch,y=density,fill=year)) +
+  geom_bar(stat="identity", position=position_dodge(),width=0.5)+
+    scale_fill_grey() +
+  ylab("Density of individuals (ind/m2)")
+ggsave("Graphs/Clump/Density individuals by patch and year barplot.jpg")
+
+#Plot line of density of patches between years
+density.patch %>% 
+  mutate(year=as.factor(year)) %>% 
+  ggplot(aes(x=year,y=density,group=Patch,color=Patch,label=Patch)) + 
+  geom_point() +
+  geom_line()+
+  theme(legend.position="bottom")+
+  geom_text(aes(label=Patch),hjust=1, vjust=0)
+
+
+rm(density.2013,density.2015,density.2017)
+```
+
+
+
+
+#Plot the probability of reproduction for each year
+
+
+```{r}
+###############################
+###FECUNDITY
+#Probability of reproduction (fec1)
+for (i in 1:length(aggregate.height.reproduction)){
+print(ggplot(aes(x=size,y=fec1),data=aggregate.height.reproduction[[i]]) + 
+  geom_point() +
+  geom_smooth(method = "glm", 
+    method.args = list(family = "binomial"), 
+    se = TRUE) + 
+  facet_wrap(~Patch) + 
+  xlab("Log height") + 
+  ylab("Probability of reproduction") + 
+  ggtitle(paste("Year",unique(aggregate.height.reproduction[[i]]$year))) +
+  theme(plot.title = element_text(hjust = 0.5)))
+}
+```
+
+```{r}
+#Format data base for analysis of reproduction 
+#Make a data base of reproduction form the list I have that contains each year
+data_reproduction_analysis<-bind_rows(aggregate.height.reproduction[[1]],aggregate.height.reproduction[[2]],aggregate.height.reproduction[[3]]) %>% 
+  inner_join(agg.openess,by="Patch")#Merge with canopy openess and patch information
+  
+  
+data_reproduction_analysis$year<-as.factor(data_reproduction_analysis$year)
+
+```
+
+
+
+```{r}
+for (i in unique(data_reproduction_analysis$Patch)){
+  
+  data_reproduction_analysis %>% 
+    filter(Patch==i) %>% 
+ggplot(aes(x=size,y=fec1)) + 
+  geom_point() +
+  geom_smooth(method = "glm", 
+    method.args = list(family = "binomial"), 
+    se = TRUE) + 
+  facet_wrap(Patch ~ year) + 
+  xlab("Log height") + 
+  ylab("Probability of reproduction")->p #+ 
+  #ggtitle(paste("Year",unique(aggregate.height.reproduction[[i]]$year))) +
+  #theme(plot.title = element_text(hjust = 0.5))
+print(p)
+}
+```
+
+```{r,include=F}
+#
+subset(data.all.years[[1]],data.all.years[[1]]$Patch==28 & data.all.years[[1]]$Bracts>0)
+
+subset(data.all.years[[2]],data.all.years[[2]]$Patch==28 & data.all.years[[2]]$Clump==7 & data.all.years[[2]]$Plot==2)
+
+#In patch 27, some plants did not reproduce in 2015, some did not survive, some where smaller so maybe that is why they did not reproduce, some of them where outside the 10x10 plot so maybe they did not take measurements, maybe they sampled the individuals in different days so it might not still produced inflorescences
+```
+
+```{r}
+
+delete.reproductive.1<-aggregate.height.reproduction[[1]] %>% 
+  filter(fec1>0) %>% 
+  mutate(Patch=as.numeric(as.character(Patch))) %>% 
+  mutate(Plot=as.numeric(as.character(Plot))) %>% 
+  mutate(fec2.2013=fec2,
+         size.2013=size) %>% 
+  dplyr::select("Patch","Plot","Clump","size.2013","fec2.2013")
+  
+
+delete.reproductive.2<-aggregate.height.reproduction[[2]] %>% 
+  filter(fec1>0) %>% 
+  mutate(Patch=as.numeric(as.character(Patch))) %>% 
+  mutate(Plot=as.numeric(as.character(Plot))) %>% 
+  mutate(fec2.2015=fec2,
+         size.2015=size) %>% 
+  dplyr::select(c("Patch","Plot","Clump","size.2015","fec2.2015"))
+delete.reproductive.3<-aggregate.height.reproduction[[3]] %>% 
+  filter(fec1>0) %>% 
+  mutate(Patch=as.numeric(as.character(Patch))) %>% 
+  mutate(Plot=as.numeric(as.character(Plot))) %>% 
+  mutate(fec2.2017=fec2,
+         size.2017=size) %>% 
+  dplyr::select(c("Patch","Plot","Clump","size.2017","fec2.2017"))
+
+delete.all.2<-aggregate.height.reproduction[[2]] %>% 
+  mutate(Patch=as.numeric(as.character(Patch))) %>% 
+  mutate(Plot=as.numeric(as.character(Plot)))%>% 
+  dplyr::select("Patch","Plot","Clump","size","fec2")
+
+delete.all.3<-aggregate.height.reproduction[[2]] %>% 
+  mutate(Patch=as.numeric(as.character(Patch))) %>% 
+  mutate(Plot=as.numeric(as.character(Plot)))%>% 
+  dplyr::select("Patch","Plot","Clump","size","fec2")
+
+delete_later <- delete.reproductive.1 %>% 
+  full_join(.,delete.reproductive.2,by=c("Patch","Plot","Clump")) %>% 
+  full_join(.,delete.all.2,by=c("Patch","Plot","Clump")) %>%
+  rowwise() %>% 
+  mutate(take=sum(fec2.2013,fec2,na.rm=T)) %>% 
+  filter(take>0) %>% 
+  mutate(size.2015=size) %>% 
+  dplyr::select(-c(take,size,fec2)) %>% 
+  full_join(.,delete.reproductive.3,by=c("Patch","Plot","Clump")) %>% 
+  full_join(.,delete.all.3,by=c("Patch","Plot","Clump")) %>%
+  rowwise() %>% 
+  mutate(take=sum(fec2.2013,fec2.2015,fec2,na.rm=T)) %>% 
+  filter(take>0) %>% 
+  mutate(size.2017=size) %>% 
+  dplyr::select(-c(take,size,fec2))
+
+#  gather(year,bracts,c(fec2.2013,fec2.2015,fec2.2017)) %>% 
+#  mutate(id=paste(Patch,Plot,Clump,sep="."))
+  
+delete_later
+
+library(purrr)
+
+
+delete_later_gathered <- delete_later %>% 
+  gather(year,bracts,c(fec2.2013,fec2.2015,fec2.2017)) %>% 
+  mutate(id=paste(Patch,Plot,Clump,sep=".")) %>%
+  mutate(bracts = ifelse(is.na(bracts), -1, bracts))
+
+
+ggplot(delete_later_gathered, aes(x=year,y=jitter(bracts), group = id)) +
+  geom_point(alpha = 0.2) +
+  geom_point(data = delete_later_gathered %>% 
+               filter(bracts == -1),
+             color = 'red', alpha = 0.2) +
+  geom_line(alpha=0.2) +
+#   geom_hline(aes(yintercept = 0), color = 'red', size = 0.4) +
+  facet_wrap(~ Patch)
+
+delete_later_gathered %>% 
+  select(Patch,Plot,Clump,year,bracts) %>% 
+  spread(year,bracts) %>% 
+  filter(fec2.2013>0 & fec2.2015>0 & fec2.2017>0) #Only 3 individuals reproduced in 3 consecutive time steps
+
+delete_later_gathered %>% 
+  select(Patch,Plot,Clump,year,bracts) %>% 
+  spread(year,bracts) %>% 
+  filter(fec2.2015>0 & fec2.2017>0) #Only 10 individuals reproduced in 2015 and 2017. #8 WITH 10X10M PLOT ACTIVE
+
+delete_later_gathered %>% 
+  select(Patch,Plot,Clump,year,bracts) %>% 
+  spread(year,bracts) %>% 
+  filter(fec2.2015>0) #88 individuals reproduced in 2015 but did not in 2017. #48 IN 10X10M  PLOT ACTIVE
+
+data_growth_surv_diff_canopy %>% 
+  select(Patch,Plot,Clump,surv) %>% 
+  inner_join(data_reproduction_analysis,by=c("Patch","Plot","Clump")) %>% 
+  filter(fec1==1) %>% 
+  summary() #All the reproductive individuals survived
+
+#Variation in number of reproductive individuals per patch per year
+data_reproduction_analysis %>% 
+  filter(fec1==1) %>% 
+  count(Patch,year) %>% 
+  ggplot(aes(x=Patch,y=n,fill=year)) +
+  geom_bar(stat="identity", position=position_dodge(),width=0.5)+
+    scale_fill_grey() +
+  ylab("Number of reproductive individuals")
+ggsave("Graphs/Clump/Reproductive individuals by patch and year barplot.jpg")
+
+#IT SEEMS THAT HELICONIA INDIVIDUALS DO NOT FLOWER EVERY YEAR EVEN THOUGH THEY FLOWERED BEFORE. IT WOULD BE INTERESTING TO MEASURE THE VARIABILITY IN FLOWERING PROBAILITY PER PATCH
+  
+rm(list=grep("delete", ls(), value = TRUE))
+
+
+```
+
+
+
+###Analysis for probability of reproduction. I store the model coefficients for each patch in prob.repr.mod
+
+```{r}
+
+#Plot pairs
+pairs(data_reproduction_analysis[,c("fec1","size","logpatch_size","percent_forest","elevation","mean_openess")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+
+#Plot each independent variable
+plot(data_reproduction_analysis$mean_openess,jitter(data_reproduction_analysis$fec1))
+
+#RUN MODELS. ***I DO NOT KNOW IF I AM DOING RIGHT SINCE I AM INCLUDING YEAR 2017 IN THE ANALYSIS, SO THE MODEL WILL COMPARE 2013 WITH 2015 AND 2013 WITH 2017. I RAN THE MODEL WITHOUT 2017 AND STILL THERE ARE DIFFERENCES BETWEEN YEARS.
+
+#Model without random structure
+#mod.1<- glm(fec1 ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year, data = data_reproduction_analysis, family = binomial) #I do not know if this is ok since I am not using REML
+mod.1<- glm(fec1 ~ size +  logpatch_size + percent_forest + elevation + mean_openess+year, data = data_reproduction_analysis, family = binomial) #I do not know if this is ok since I am not using REML
+summary(mod.1)
+
+#****I WAS READING HOW TO DO A glmm IN THE BOOK
+#GLMM with random effects of patch but with random intercept only.  I AM NOT USING REML, I DO NOT KNOW IF THAT IS CORRECT. 
+#mod.2 <- glmer(fec1~scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+scale(size)+ year + (1 | Patch),data=data_reproduction_analysis, family = binomial)
+mod.2 <- glmer(fec1~logpatch_size+percent_forest+elevation+mean_openess+size+ year + (1 | Patch),data=data_reproduction_analysis, family = binomial) #Convergence error
+summary(mod.2)
+
+#GLMM nesting plot in patch but with random intercept only. I AM NOT USING REML, I DO NOT KNOW IF THAT IS CORRECT. 
+#mod.3 <- glmer(fec1~scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+scale(size)+ year + (1 | Patch/Plot),data=data_reproduction_analysis, family = binomial)
+mod.3 <- glmer(fec1~logpatch_size+percent_forest+elevation+mean_openess+size+ year + (1 | Patch/Plot),data=data_reproduction_analysis, family = binomial) #Convergence error
+summary(mod.3)
+
+#GLMM of of randome effects with patch but using random slope and intercept. I AM NOT USING REML, I DO NOT KNOW IF THAT IS CORRECT. 
+#mod.4 <- glmer(fec1~scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+scale(size)+ year + (1 + fec1 | Patch),data=data_reproduction_analysis, family = binomial)
+#summary(mod.4)
+
+#GLMM of of randome effects with plot nested in patch but using random slope and intercept. I AM NOT USING REML, I DO NOT KNOW IF THAT IS CORRECT. 
+#mod.5 <- glmer(fec1~scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+scale(size)+ year + (1 + fec1 | Patch/Plot),data=data_reproduction_analysis, family = binomial)
+#summary(mod.5)
+
+#I WILL USE MODEL 2 SINCE I DO NOT KNOW HOW TO INCLUDE IN THE IPM OTHER KIND OF MODELS
+#Without percent forest
+#mod.6 <- glmer(fec1~scale(logpatch_size)+scale(elevation)+scale(100-mean_openess)+scale(size)+ year + (1 | Patch),data=data_reproduction_analysis, family = binomial)
+mod.6 <- glmer(fec1~logpatch_size+elevation+mean_openess+size+ year + (1 | Patch),data=data_reproduction_analysis, family = binomial) #Error model convergence
+summary(mod.6) 
+
+#Without patch size
+#mod.7 <- glmer(fec1~scale(elevation)+scale(100-mean_openess)+scale(size)+ year + (1 | Patch),data=data_reproduction_analysis, family = binomial)
+mod.7 <- glmer(fec1~elevation+mean_openess+size+ year + (1 | Patch),data=data_reproduction_analysis, family = binomial) #Error model convergence
+summary(mod.7)
+
+#Without elevation (although elevation is marginally significant)
+#mod.8 <- glmer(fec1~scale(100-mean_openess)+scale(size)+ year + (1 | Patch),data=data_reproduction_analysis, family = binomial)
+mod.8 <- glmer(fec1~mean_openess+size+ year + (1 | Patch),data=data_reproduction_analysis, family = binomial) #Error model convergence
+summary(mod.8)
+
+#AIC selection
+Weights(AIC(mod.6,mod.7,mod.8))
+
+#Selected mod.7 accorrding to AIC
+model.selected<-mod.7 #WITH 10X10M ACTIVE ELEVATION, MEAN OPENNES, SIZE AND YEAR ARE STATISTICALLY SIGNIFICANT
+```
+
+
+```{r,echo=F}
+
+#print(xyplot(fec1~size|year,data=data_reproduction_analysis,main= "Probability of reproduction")+layer(panel.smoother(..., col = "red")))
+
+#Substract information from model selected. 
+#Fecundity on year 2013 that will be used for first transition
+for (i in 2:2){
+  
+  for (k in 1:length(demographic.output[[i]])){
+    #I am selecting only the first 4 coefficients since year is a dummy variable and is comparing 2013 with 2015 and 2017
+    demographic.output[[i]][[k]]$prob.repr.mod<-subset(coef(model.selected)$Patch[,1:4],as.numeric(substr(row.names(coef(model.selected)$Patch),1,2))==demographic.output[[i]][[k]]$data$Patch[1])
+    #Naming the columns of the parameters vector
+    #names(demographic.output[[i]][[k]]$prob.repr.mod)<-c("prob.rep.int","prob.rep.scale.size","prob.rep.scale.elevation","prob.rep.scale.100.minus.mean_openess")
+    names(demographic.output[[i]][[k]]$prob.repr.mod)<-c("prob.rep.int","prob.rep.elevation","prob.rep.mean_openess","prob.rep.size")
+    
+    #Adding the information of the parameters of the probability of reproduction vector to the p.vec
+    demographic.output[[i]][[k]]$p.vec<-cbind(demographic.output[[i]][[k]]$p.vec,demographic.output[[i]][[k]]$prob.repr.mod)
+    
+    #Deleting objecto fo list
+    demographic.output[[i]][[k]]$prob.repr.mod<-NULL
+    
+  }
+}
+
+
+
+#Substract information from model selected. 
+#Fecundity on year 2015 that will be used for first transition
+for (i in 3:3){
+  
+  for (k in 1:length(demographic.output[[i]])){
+    #I am selecting only the first 4 coefficients since year is a dummy variable and is comparing 2013 with 2015 and 2017
+    demographic.output[[i]][[k]]$prob.repr.mod<-subset(coef(model.selected)$Patch[,1:5],as.numeric(substr(row.names(coef(model.selected)$Patch),1,2))==demographic.output[[i]][[k]]$data$Patch[1])
+    #Naming the columns of the parameters vector
+    #names(demographic.output[[i]][[k]]$prob.repr.mod)<-c("prob.rep.int","prob.rep.scale.size","prob.rep.scale.elevation","prob.rep.scale.100.minus.mean_openess","prob.rep.year.2015")
+    names(demographic.output[[i]][[k]]$prob.repr.mod)<-c("prob.rep.int","prob.rep.elevation","prob.rep.mean_openess","prob.rep.size","prob.rep.year.2015")
+    
+    #Adding the information of the parameters of the probability of reproduction vector to the p.vec
+    demographic.output[[i]][[k]]$p.vec<-cbind(demographic.output[[i]][[k]]$p.vec,demographic.output[[i]][[k]]$prob.repr.mod)
+    
+    #Deleting objecto fo list
+    demographic.output[[i]][[k]]$prob.repr.mod<-NULL
+    
+  }
+}
+
+
+
+#Year 2015
+#for (i in 2:2){
+  
+#  for (k in 1:length(demographic.output[[i]])){
+    
+#    demographic.output[[i]][[k]]$prob.repr.mod<-subset(coef(model.selected)$Patch[,1:5],as.numeric(substr(row.names(coef(model.selected)$Patch),1,2))==demographic.output[[i]][[k]]$data$Patch[1])
+    
+#  }
+#}
+
+#Here I add the information of the parameters of 2015
+#for (i in 2:2){
+  
+#  for (k in 1:length(demographic.output[[i]])){
+#    demographic.output[[i]][[k]]$p.vec<-demographic.output[[1]][[k]]$p.vec
+    
+#demographic.output[[i]][[k]]$p.vec$pr.2015<-demographic.output[[i]][[k]]$prob.repr.mod[1,ncol(demographic.output[[i]][[k]]$prob.repr.mod)]
+    
+#  }
+#}
+
+#Year 2017
+#for (i in 3:3){
+  
+#  for (k in 1:length(demographic.output[[i]])){
+    
+#    demographic.output[[i]][[k]]$prob.repr.mod<-subset(coef(model.selected)$Patch[,c(1:4,6)],as.numeric(substr(row.names(coef(model.selected)$Patch),1,2))==demographic.output[[i]][[k]]$data$Patch[1])
+    
+#  }
+#}
+
+
+#According to me, I do not need a p.vec for the third year since I would need also a thrid growth transition and I do not have it
+```
+
+
+```{r,echo=F}
+
+jpeg("Graphs/Clump/probability of reproduction vs plant height by year.jpg",quality=100,width=600,height=600)
+par(mar=c(5,6,5,6))
+#size
+plot(data_reproduction_analysis$size,jitter(data_reproduction_analysis$fec1),xlab="Log height",ylab="Probability of reproduction",main="Probability of reproduction by size",cex.axis=2,cex.lab=2,cex=2,cex.main=2)
+
+#Draw line in y=1
+abline(h=1,col="blue",lwd=2,lty=2)
+
+#Generate a sequence of sizes so that I can predict values
+prediction<-seq(from=min(data_reproduction_analysis$size),to=max(data_reproduction_analysis$size),by=0.01)
+
+#Make a data frame with the coefficents of the model
+parameters<-coef(model.selected)$Patch
+
+#Predict values
+res.pred.2013<-exp(mean(parameters$`(Intercept)`)+(unique(parameters$size)*prediction)+unique(parameters$elevation)+unique(parameters$mean_openess))
+
+res.pred.2015<-exp(mean(parameters$`(Intercept)`)+(unique(parameters$size)*prediction)+unique(parameters$elevation)+unique(parameters$mean_openess)+unique(parameters$year2015))
+
+res.pred.2017<-exp(mean(parameters$`(Intercept)`)+(unique(parameters$size)*prediction)+unique(parameters$elevation)+unique(parameters$mean_openess)+unique(parameters$year2017))
+
+#Draw lines in graph
+lines(prediction,(res.pred.2013/(1+res.pred.2013)), col="red",lwd=3,)
+lines(prediction,(res.pred.2015/(1+res.pred.2015)), col="green",lwd=3)
+lines(prediction,(res.pred.2017/(1+res.pred.2017)), col="orange",lwd=3)
+
+#Put legend
+legend("topleft",legend=c("2013","2015","2017"),col=c("red","green","orange"),bty="n",lty=1,lwd=2,cex=1.5)
+text(x=8.7,y=1.2,labels="a)",font=2,cex=1.5)
+
+
+
+dev.off()
+
+data_reproduction_analysis %>% 
+  ggplot(aes(x=size,y=fec1),group=year) + 
+  geom_point() + 
+  geom_smooth(method = "glm", 
+    method.args = list(family = "binomial"), 
+    se = TRUE,
+    aes(group=year,colour=year)) +
+  xlab("Log height") +
+  ylab("Probability of reproduction") +
+  labs(group = 'Year')
+
+p0<-data_reproduction_analysis %>% 
+  ggplot(aes(x=size,y=fec1)) + 
+  geom_point(position = position_jitter(height = 0.1, width = 0.1), alpha = 0.5) + 
+  geom_smooth(method = "glm", 
+    method.args = list(family = "binomial"), 
+    se = TRUE,
+    aes(colour = year)) +
+  xlab("Log of number of shoots") +
+  ylab("Probability of reproduction") +
+  labs(colour = 'Year')  +
+  geom_text(x=8.7, y=1.1, label="a)") +
+  theme(legend.position="top",
+        legend.justification ="center") # +
+  #scale_colour_discrete(name = "Year", labels = c("A", "B", "C")) + theme_bw()
+ggsave("Graphs/Clump/Probability of reproduction by year shoots.jpg")
+
+data_reproduction_analysis %>% 
+  ggplot(aes(x=size.original,y=fec1)) + 
+  geom_point(position = position_jitter(height = 0.1, width = 0.1), alpha = 0.5) + 
+  geom_smooth(method = "glm", 
+    method.args = list(family = "binomial"), 
+    se = TRUE,
+    aes(colour = year)) +
+  xlab("Number of shoots") +
+  ylab("Probability of reproduction") +
+  labs(colour = 'Year')  +
+  geom_text(x=8.7, y=1.1, label="a)") +
+  theme(legend.position="top",
+        legend.justification ="center") # +
+  #scale_colour_discrete(name = "Year", labels = c("A", "B", "C")) + theme_bw()
+ggsave("Graphs/Clump/Probability of reproduction by year shoots without log.jpg")
+
+#number of plants with 0- x inflorescences
+data_reproduction_analysis %>% 
+  group_by(Patch,Plot,Clump,year) %>% 
+  summarise(num.infl=sum(fec2)) %>% 
+  ungroup() %>% 
+  mutate(num.infl=replace_na(num.infl,0)) %>% 
+  ggplot(aes(x=num.infl)) +
+  geom_histogram() +
+  facet_wrap(~year)
+ggsave("Graphs/Number inflorecences count above 75 cm Adam Madeleine.jpg")
+
+#Proportion of plants that have x number of inflorescences
+data_reproduction_analysis %>% 
+  group_by(Patch,Plot,Clump) %>% 
+  summarise(num.infl=sum(fec2)) %>% 
+  ungroup() %>% 
+  mutate(num.infl=replace_na(num.infl,0)) %>% 
+  group_by(num.infl) %>% 
+  summarise(proportion=n()/nrow(.),
+            percentage=100*(n()/nrow(.)))
+
+#Number of plants with 1-n inflorescences
+data_reproduction_analysis %>% 
+  group_by(Patch,Plot,Clump) %>% 
+  summarise(num.infl=sum(fec2)) %>% 
+  ungroup() %>% 
+  mutate(num.infl=replace_na(num.infl,0)) %>% 
+  filter(num.infl>0) %>% 
+  ggplot(aes(x=num.infl)) +
+  geom_histogram()
+
+p1<-data_reproduction_analysis %>% 
+  ggplot(aes(x=elevation,y=jitter(fec1)))+
+  geom_point(shape=1)+
+  geom_smooth(method="lm",col="red") +
+  xlab("Elevation (m.a.s.l.)") + 
+  ylab("Probability of reproduction") +
+  geom_text(x=1500, y=1.21, label="b)")
+ggsave("Graphs/Clump/probability of reproduction vs elevation.jpg")
+
+
+p2<-data_reproduction_analysis %>% 
+  ggplot(aes(x=mean_openess,y=jitter(fec1)))+
+  geom_point(shape=1)+
+  geom_smooth(method="lm",col="red") +
+  xlab("Mean canopy openness (%)") + 
+  ylab("Probability of reproduction") +
+  geom_text(x=20.25, y=1.21, label="c)")
+ggsave("Graphs/Clump/probability of reproduction vs canopy openness.jpg")
+
+library("gridExtra")
+p3<-grid.arrange(p0,p1, p2,ncol=3)
+ggsave("Graphs/Clump/probability of reproduction vs variables.jpg",plot=p3)
+
+rm(prediction,res.pred.2013,res.pred.2015,res.pred.2017,p0,p1,p2,p3)
+
+#Remove objects used for the modelling
+rm(list=grep("mod.", ls(), value = TRUE))
+
+#par(new=T)
+#Plot regression line
+#abline(mod.4$coefficients$fixed[1:2],col="red",lwd=3)
+#dev.off()
+
+```
+
+
+
+```{r}
+#Growth of reproductive individuals
+data_reproduction_analysis %>%
+  select(Patch,Clump,Plot,fec1) %>% 
+  filter(fec1==1) %>% inner_join(data_growth_surv_diff_canopy,by=c("Patch","Plot","Clump")) %>%
+  ggplot(aes(x=size,y=sizeNext)) + 
+  geom_point() + 
+  geom_smooth(method="lm") +
+  geom_abline(intercept=0,slope=1,col="red")
+
+
+data_reproduction_analysis %>%
+  select(Patch,Clump,Plot,fec1) %>%
+  filter(fec1==1) %>%
+  inner_join(data_growth_surv_diff_canopy,by=c("Patch","Plot","Clump")) %>% 
+  select(size,sizeNext,logpatch_size,percent_forest,elevation,mean_openess,year) %>% 
+  ggpairs(upper=list(continuous="points"),lower=list(continuous="cor"))
+```
+
+```{r}
+#Growth only
+data_growth_surv_diff_canopy %>% filter(diff>0) %>% select(diff,logpatch_size,percent_forest,elevation,mean_openess) %>% ggpairs(upper=list(continuous="points"),lower=list(continuous="cor"))
+
+#Shrinkange only
+data_growth_surv_diff_canopy %>% filter(diff<0) %>% select(diff,logpatch_size,percent_forest,elevation,mean_openess) %>% ggpairs(upper=list(continuous="points"),lower=list(continuous="cor"))
+```
+
+
+#Plot number of inflorescences per clump
+
+```{r,warning=F,echo=F}
+
+
+########################
+#Number of inflorescences per individual (fec2)
+
+for (i in 1:length(aggregate.height.reproduction)){
+print(ggplot(aes(x=size,y=fec2),data=aggregate.height.reproduction[[i]]) + 
+  geom_point(alpha=0.5) +
+  geom_smooth(se = TRUE) + 
+  facet_wrap(~Patch) + 
+  xlab("Log height") + 
+  ylab("Number of inflorescences") + 
+  ggtitle(paste("Year",unique(aggregate.height.reproduction[[i]]$year))) +
+  theme(plot.title = element_text(hjust = 0.5)))
+}
+```
+```{r}
+for (i in unique(data_reproduction_analysis$Patch)){
+  
+  data_reproduction_analysis %>% 
+    filter(Patch==i) %>% 
+ggplot(aes(x=size,y=fec2)) + 
+  geom_point() +
+  geom_smooth(se = TRUE) + 
+  facet_wrap(Patch ~ year) + 
+  xlab("Log height") + 
+  ylab("Number of inflorescences")->p #+ 
+  #ggtitle(paste("Year",unique(aggregate.height.reproduction[[i]]$year))) +
+  #theme(plot.title = element_text(hjust = 0.5))
+print(p)
+}
+```
+
+
+
+###Abnalysis of number of inflorescences per clump. I store the data in num.inflor.mod
+
+```{r}
+
+#Plot pairs
+pairs(data_reproduction_analysis[,c("fec2","size","logpatch_size","percent_forest","elevation","mean_openess")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+
+#RUN MODELS
+ 
+#Model without random structure
+#mod.1<-glm(fec2 ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year, family="poisson", data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"))
+mod.1<-glm(fec2 ~ size +  logpatch_size + percent_forest + elevation + mean_openess+year, family="poisson", data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"))
+
+summary(mod.1)
+
+library("lme4")
+
+#GLMM nesting Patch
+#mod.2<-glmer(fec2 ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson")
+mod.2<-glmer(fec2 ~ size +  logpatch_size + percent_forest + elevation + mean_openess+year+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson") #Error convergence
+summary(mod.2)
+
+#GLMM nesting Plot in Patch
+#mod.3<-glmer(fec2 ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year+(1 | Patch/Plot),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson")
+mod.3<-glmer(fec2 ~ size +  logpatch_size + percent_forest + elevation + mean_openess+year+(1 | Patch/Plot),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson") #Error convergence
+
+summary(mod.3)
+
+#GLMM nesting Patch and with random slope
+#mod.4<-glmer(fec2 ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year+(fec2 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson")
+mod.4<-glmer(fec2 ~ size +  logpatch_size + percent_forest + elevation + mean_openess + year + (fec2 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson") #Error convergence
+
+summary(mod.4)
+
+#GLMM nesting Patch
+#mod.5<-glmer(fec2 ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year+(fec2 | Patch/Plot),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson")
+mod.5<-glmer(fec2 ~ size +  logpatch_size + percent_forest + elevation + mean_openess + year + (fec2 | Patch/Plot),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson") #error convergence
+
+summary(mod.5)
+
+
+
+#The best model includes a random slope and intercept and the random effects are patch/plot. I will not use it for now since I do not know how to put it in my model
+Weights(AIC(mod.1,mod.2,mod.3,mod.4,mod.5))
+
+#The best model is without a random structure, but I will not use it since I think it should include a random structure because of the violation of the independence of the data
+Weights(AIC(mod.1,mod.2,mod.3))
+
+#From these models, the best one is model 2, so I will use it
+Weights(AIC(mod.2,mod.3))
+
+#Without patch size
+#mod.6<-glmer(fec2 ~ scale(size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson")
+mod.6<-glmer(fec2 ~ size + percent_forest + elevation + mean_openess+year+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson") #Error convergence
+summary(mod.6)
+
+#Without year
+#mod.7<-glmer(fec2 ~ scale(size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson")
+mod.7<-glmer(fec2 ~ size + percent_forest + elevation + mean_openess+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson") #Error convergence
+summary(mod.7)
+
+#Withuot elevation
+#mod.8<-glmer(fec2 ~ scale(size)+scale(elevation)+scale(100-mean_openess)+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson")
+mod.8<-glmer(fec2 ~ size + percent_forest  + mean_openess+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson") #Error convergence
+summary(mod.8)
+
+#Without mean_openess
+#mod.9<-glmer(fec2 ~ scale(size)+scale(100-mean_openess)+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson")
+mod.9<-glmer(fec2 ~ size + percent_forest +(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson") #Error convergence
+summary(mod.9)
+
+#Without percent forest
+#mod.10<-glmer(fec2 ~ scale(size)+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson")
+mod.10<-glmer(fec2 ~ size +(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),family="poisson")
+summary(mod.10)
+
+mod.11<-nls(log(fec2) ~ I(exp(1)^(a + b * size)), data =subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"),start = list(a = 0, b = 1), trace = T)
+summary(mod.11)
+
+#I tired to log transform the response variable and run a liner model but id did not work very well. 
+#mod.12<-lm(log(fec2)~size,data =subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec2)=="FALSE"))
+#summary(mod.12)
+
+#For now I will select this model
+model.selected<-mod.11
+#AIC selection
+Weights(AIC(mod.6,mod.7,mod.8,mod.9,mod.10,mod.11))
+
+#Select best model
+#model.selected<-mod.9
+#model.selected<-mod.11
+```
+
+
+```{r}
+#Substract information from model selected. THIS IS THE ORIGINAL CODE FOR THE MODEL SELECTION WITH RANDOM EFFECTS. i WILL ADD THE EXPONENTIAL FUNCTION. 
+#for (i in 2:length(demographic.output)){
+  
+#  for (k in 1:length(demographic.output[[i]])){
+    
+#    demographic.output[[i]][[k]]$num.inflor.model<-subset(coef(model.selected)$Patch,as.numeric(substr(row.names(coef(model.selected)$Patch),1,2))==demographic.output[[i]][[k]]$data$Patch[1])
+    
+#    names(demographic.output[[i]][[k]]$num.inflor.model)<-c("num.inflor.int","num.inflor.size","num.infl.mean_openess")
+    
+#    demographic.output[[i]][[k]]$p.vec<-cbind(demographic.output[[i]][[k]]$p.vec,demographic.output[[i]][[k]]$num.inflor.model)
+    
+#    demographic.output[[i]][[k]]$num.inflor.model<-NULL
+#  }
+#}
+
+#Exponential model
+for (i in 2:length(demographic.output)){
+  
+  for (k in 1:length(demographic.output[[i]])){
+    
+    demographic.output[[i]][[k]]$num.inflor.model<-coef(mod.11)
+    
+    names(demographic.output[[i]][[k]]$num.inflor.model)<-c("num.inflor.int","num.inflor.size")
+    
+    demographic.output[[i]][[k]]$p.vec<-cbind(demographic.output[[i]][[k]]$p.vec,demographic.output[[i]][[k]]$num.inflor.model[1],demographic.output[[i]][[k]]$num.inflor.model[2])
+    
+    colnames(demographic.output[[i]][[k]]$p.vec)[(ncol(demographic.output[[i]][[k]]$p.vec)-1):ncol(demographic.output[[i]][[k]]$p.vec)]<-c("num.inflor.int","num.inflor.size")
+    
+    demographic.output[[i]][[k]]$num.inflor.model<-NULL
+  }
+}
+```
+
+```{r,echo=F}
+
+jpeg("Graphs/Clump/number of inflorescences.jpg",quality=100,width=1000,height=700)
+par(mar=c(5,6,5,2))
+#size
+plot(data_reproduction_analysis$size,data_reproduction_analysis$fec2,xlab="Log height",ylab="Number of inflorescences",cex.axis=2,cex.lab=2,cex=2,cex.main=2,main="Number of inflorescences")
+
+
+#Generate a sequence of sizes so that I can predict values
+prediction<-seq(from=min(data_reproduction_analysis$size),to=max(data_reproduction_analysis$size),by=0.01)
+
+
+#Predict values. In the model, I am log transforming the y variable, so by putting exp in the results of the prediction I am transforming the values to it original scale
+res.pred<-exp(predict(mod.11,list(size=prediction)))
+
+
+#Draw lines in graph
+lines(prediction,res.pred, col="red",lwd=3)
+
+dev.off()
+
+data_reproduction_analysis %>% 
+  ggplot(aes(x=size,y=fec2)) +
+  geom_point(position=position_jitter(height=0.3,width=0.1),alpha=0.5) +
+  geom_smooth(method="lm",formula= (y ~ exp(x)),col="red") +
+  xlab("Log of number of shoots") +
+  ylab("Number of inflorescences")
+ggsave("Graphs/New/Number of inflorescences shoots.jpg")
+
+#
+#plot(data_reproduction_analysis$percent_forest,data_reproduction_analysis$fec2,xlab="Percent of forest in a 1 km radius",ylab="Number of inflorescences",cex.axis=3,cex.lab=3,cex=3,cex.main=3,main="Number of inflorescences")
+
+
+#Remove objects used for the modelling
+rm(list=grep("mod.", ls(), value = TRUE))
+
+#par(new=T)
+#Plot regression line
+#abline(mod.6$coefficients$fixed[1:2],col="red",lwd=3)
+#dev.off()
+
+```
+
+
+#Plot mean number of bracts per inflorescence
+```{r,echo=F}
+
+for (i in 1:length(aggregate.height.reproduction)){
+print(ggplot(aes(x=size,y=fec3),data=aggregate.height.reproduction[[i]]) + 
+  geom_point(alpha=0.5) +
+  geom_smooth(se = TRUE) + 
+  facet_wrap(~Patch) + 
+  xlab("Log height") + 
+  ylab("Mean number of bracts per inflorescence") + 
+  ggtitle(paste("Year",unique(aggregate.height.reproduction[[i]]$year))) +
+  theme(plot.title = element_text(hjust = 0.5)))
+}
+```
+
+```{r}
+for (i in unique(data_reproduction_analysis$Patch)){
+  
+  data_reproduction_analysis %>% 
+    filter(Patch==i) %>% 
+ggplot(aes(x=size,y=fec3)) + 
+  geom_point() +
+  geom_smooth(se = TRUE) + 
+  facet_wrap(Patch ~ year) + 
+  xlab("Log height") + 
+  ylab("Mean number of bracts per inflorescence")->p #+ 
+  #ggtitle(paste("Year",unique(aggregate.height.reproduction[[i]]$year))) +
+  #theme(plot.title = element_text(hjust = 0.5))
+print(p)
+}
+```
+
+
+#I saved the models in num.bracts.model
+```{r}
+#ANALYSIS OF NUMBER OF MEAN NUMBER OF BRACTS PER INFLORESCENCES USING CANOPY OPENESS
+#Plot pairs for number of BRACTS PER INFLORESCENCES
+pairs(data_reproduction_analysis[,c("fec3","size","logpatch_size","percent_forest","elevation","mean_openess")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+
+
+#Model without random structure
+#mod.1<-glm(fec3 ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year, family="poisson", data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"))
+mod.1<-glm(fec3 ~ size +  logpatch_size + percent_forest + elevation + mean_openess+year, family="poisson", data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"))
+summary(mod.1)
+
+library("lme4")
+
+#GLMM nesting Patch
+#mod.2<-glmer(fec3 ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson")
+
+mod.2<-glmer(fec3 ~ size +  logpatch_size + percent_forest + elevation + mean_openess+year+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson") #Convergence error
+summary(mod.2)
+
+#GLMM nesting Plot in Patch
+#mod.3<-glmer(fec3 ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year+(1 | Patch/Plot),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson")
+mod.3<-glmer(fec3 ~ size +  logpatch_size + percent_forest + elevation + mean_openess + year + (1 | Patch/Plot),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson") #Convergence error
+
+summary(mod.3)
+
+###MODEL 4 AND 5 DO NOT WANT TO WORK
+#GLMM nesting Patch and with random slope
+#mod.4<-glmer(fec3 ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year+(fec2 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson")
+
+#summary(mod.4)
+
+#GLMM nesting Patch
+#mod.5<-glmer(fec3 ~ scale(size) +  scale(logpatch_size)+scale(percent_forest)+scale(elevation)+scale(100-mean_openess)+year+(fec2 | Patch/Plot),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson")
+
+#summary(mod.5)
+
+
+
+#The best model is the one without a random structure. I will run weights with the models that have a random structure. 
+Weights(AIC(mod.1,mod.2,mod.3))
+
+#The best model is the one with random intrecept only 
+Weights(AIC(mod.2,mod.3))
+
+#Without percent of forest
+#mod.6<-glmer(fec3 ~ scale(size) +  scale(logpatch_size)+scale(elevation)+scale(100-mean_openess)+year+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson")
+mod.6<-glmer(fec3 ~ size +  logpatch_size + elevation + mean_openess+year+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson") #Error convergence
+summary(mod.6)
+
+#Without elevation
+#mod.7<-glmer(fec3 ~ scale(size) +  scale(logpatch_size)+scale(100-mean_openess)+year+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson")
+mod.7<-glmer(fec3 ~ size +  logpatch_size + mean_openess+year+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson")
+
+summary(mod.7)
+
+#Without year
+#mod.8<-glmer(fec3 ~ scale(size) +  scale(logpatch_size)+scale(100-mean_openess)+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson")
+mod.8<-glmer(fec3 ~ size +  logpatch_size + mean_openess+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson")
+
+summary(mod.8)
+
+#Without mean canopy openess
+#mod.9<-glmer(fec3 ~ scale(size) +  scale(logpatch_size)+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson")
+mod.9<-glmer(fec3 ~ size +  logpatch_size + (1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson")
+
+summary(mod.9)
+
+Weights(AIC(mod.6,mod.7,mod.8,mod.9)) #Best model is 8
+
+#Select best model
+model.selected<-mod.9
+
+
+```
+
+
+```{r}
+#Substract information from model selected. 
+for (i in 1:length(demographic.output)){
+  
+  for (k in 1:length(demographic.output[[i]])){
+    
+    demographic.output[[i]][[k]]$num.bracts.model<-coef(model.selected)
+    
+  }
+}
+
+
+#Substract information from model selected. 
+for (i in 2:length(demographic.output)){
+  
+  for (k in 1:length(demographic.output[[i]])){
+    
+    demographic.output[[i]][[k]]$num.bracts.model<-subset(coef(model.selected)$Patch,as.numeric(substr(row.names(coef(model.selected)$Patch),1,2))==demographic.output[[i]][[k]]$data$Patch[1])
+    
+    #names(demographic.output[[i]][[k]]$num.bracts.model)<-c("mean.num.bract.per.infl.int","mean.num.bract.per.infl.scale.size","mean.num.bract.per.infl.scale.logpatch_size")
+    names(demographic.output[[i]][[k]]$num.bracts.model)<-c("mean.num.bract.per.infl.int","mean.num.bract.per.infl.size","mean.num.bract.per.infl.logpatch_size")
+    
+    demographic.output[[i]][[k]]$p.vec<-cbind(demographic.output[[i]][[k]]$p.vec,demographic.output[[i]][[k]]$num.bracts.model)
+    
+    demographic.output[[i]][[k]]$num.bracts.model<-NULL
+  }
+}
+```
+
+
+```{r}
+
+
+jpeg("Graphs/Clump/mean number of bracts per inflorescence vs plant height.jpg",quality=100,width=800,height=800)
+par(mar=c(5,6,5,2))
+#size
+plot(subset(data_reproduction_analysis,data_reproduction_analysis$fec3>0)$size,subset(data_reproduction_analysis,data_reproduction_analysis$fec3>0)$fec3,xlab="Log height",ylab="Mean number of bracts per inflorescence",cex.axis=2,cex.lab=2,cex=2,cex.main=2,xlim=c(min(subset(data_reproduction_analysis,data_reproduction_analysis$fec3>0)$size,na.rm=T),max(subset(data_reproduction_analysis,data_reproduction_analysis$fec3>0)$size,na.rm=T)))
+
+#Generate a sequence of sizes so that I can predict values
+prediction<-seq(from=min(subset(data_reproduction_analysis,data_reproduction_analysis$fec3>0)$size),to=max(subset(data_reproduction_analysis,data_reproduction_analysis$fec3>0)$size),by=0.01)
+
+
+#Predict values. In the model, I am log transforming the y variable, so by putting exp in the results of the prediction I am transforming the values to it original scale
+res.pred<-exp(demographic.output[[i]][[k]]$p.vec$mean.num.bract.per.infl.int+demographic.output[[i]][[k]]$p.vec$mean.num.bract.per.infl.size*prediction)
+
+
+
+#Draw lines in graph
+lines(prediction,res.pred, col="red",lwd=3)
+
+
+dev.off()
+
+rm(list= grep("mod.", ls(), value = TRUE))
+
+p1<-data_reproduction_analysis %>% 
+  filter(fec3>0) %>% 
+  ggplot(aes(x=size,y=fec3)) +
+  geom_point(position=position_jitter(height=0.1,width=0.1),alpha=0.5) +
+  geom_smooth(method="glm",col="red",method.args = list(family = "poisson")) +
+  xlab("Log of number of shoots") +
+  ylab("Mean number of bracts per inflorescence") +
+  geom_text(x=8.1, y=8, label="a)",fontface="bold")
+ggsave("Graphs/Clump/Number of bracts per inflorescence shoots.jpg")
+
+p2<-data_reproduction_analysis %>% 
+  filter(fec3>0) %>% 
+  ggplot(aes(x=logpatch_size,y=fec3)) +
+  geom_point() +
+  geom_smooth(method="lm",col="red") +
+  xlab("Log patch size") +
+  ylab("Mean number of bracts per inflorescence") +
+  geom_text(x=7.3, y=8, label="b)",fontface="bold")
+p3<-grid.arrange(p1, p2, ncol=2)
+
+ggsave("Graphs/Clump/mean number of bracts per inflorescences vs size and patch size.jpg",plot=p3)
+
+
+data_reproduction_analysis %>% 
+  filter(fec2>0) %>% 
+  group_by(Patch,Plot,Clump) %>% 
+  summarise(n()) %>% 
+  ggplot(aes(x=`n()`))+
+  geom_histogram(bins=3,color="black", fill="grey") + 
+  xlab("Number of inflorescences") +
+  ylab("Counts")
+
+rm(p1,p2,p3)
+```
+
+
+#Source the code where I analyze the seed germination and seedling survival data
+```{r}
+#Patch size, proportion of forest and elevation did not explain germination rates
+#purl("seed germination experiment.Rmd",output="seed germination experiment code.R")
+source("seed germination experiment code.R",local=T)
+
+#purl("seedling survival experiment.Rmd",output="seedling survival experiment code.R")
+source("seedling survival experiment code.R")
+
+#Remove data generated from files sourced
+rm(agg.surv.max,agg.surv.sec.max,canopy,database.sec.max.dates,demographic.plots.info.dates,exp.info,k,l,max.dates,max.dates.demographic.plots,max.min.dates,patches,seedlings, seedlings.max,seedlings.sec.max,seedlings.subset.max,seedlings.subset.sec.max)
+
+rm(list= grep("mod.", ls(), value = TRUE))
+```
+
+# Put values in all other parameters. Most of them are constants
+
+```{r}
+
+#1:length(demographic.output). i=9 does not have seedlings
+for (i in 2:3){
+  for (k in 1:length(demographic.output[[i]])){
+    
+    #for (i in 1:3){
+    #  for (k in 1:12){
+    
+    #########################
+    #Set the constants of the other parts of the fecundity
+    #*****MAYBE ADAM HAS INFORMATION ON THIS. Number of flowers per bract I took it from the Stiles 1975 paper. I do not know
+    demographic.output[[i]][[k]]$p.vec$number_flowers<-15
+    
+    #*****MAYBE ADAM HAS INFORMATION ON THIS, SINCE THERE CAN BE A LOT OF FLOWERS BUT MAYBE NOT ALL OF THEM ARE POLLINATED. Fruits per flower. Each flower can only produce one fruit
+    demographic.output[[i]][[k]]$p.vec$fruits_per_flower<-1
+    
+    #****ASK ADAM ABOUT THIS DATA. Seeds per fruit. The mean would be 2 because it can produce between 1 and 3 fruits
+    demographic.output[[i]][[k]]$p.vec$seeds_per_fruit<-2
+    
+    #HERE I CAN ADD DISPERSAL PROBABILITY FROM THE CHAPTER 2 MODEL
+    
+    #HERE I CAN ADD PREDATION
+    
+    #*****ASK ADAM ABOUT THIS DATA. Probabiity of germination. I took that value from mean survival in Bruna 2002, figure 3
+    #(2+1+5.5+1.5+1+6+5+4+10.5)/9
+    #demographic.output[[i]]$prob_germination<-0.04
+    
+    
+    #**** ASK ADAM ABOUT THIS DATA. Probablity of survival. I took that value from mean survival3 min,4 max, 5 min,6 min, 9 max, 11 min and max
+    #(65+87+85)/3
+    
+    #Here I have two trays per plot, so I will obtain the mean of the proportion of seeds that germinated at each plot
+    demographic.output[[i]][[k]]$p.vec$prob_germination<-mean(subset(germination.data,germination.data$Site==demographic.output[[i]][[k]]$data[1,1])$prop.germ,na.rm=T)
+  }
+}
+    
+```
+
+
+```{r}
+    for (i in 2:3){
+  for (k in 1:length(demographic.output[[i]])){
+    #Seedling survival
+    #subset.agg.surv<-subset(agg.surv,agg.surv$Site==demographic.output[[i]][[k]]$data[1,1])
+
+    
+    #demographic.output[[i]][[k]]$p.vec$prob_surv_seedlings<-subset.agg.surv$prop.surv
+    
+    demographic.output[[i]][[k]]$p.vec$seedling.surv.int<-coef(regression.sel.surv.seedlings)[1]
+    
+    demographic.output[[i]][[k]]$p.vec$seedling.surv.elevation<-coef(regression.sel.surv.seedlings)[2]
+  }
+}
+
+rm(germination.data,agg.surv)
+
+```
+
+```{r}
+
+
+#Log transform the data because it is not normaly distributed
+seedling.size$logHeight<-log(seedling.size$Height_cm)
+
+#rm(data.all.years)
+
+pairs(seedling.size[,c("logHeight","logpatch_size","percent_forest","elevation","mean_openess","year")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+
+library("ggplot2")
+ggplot(seedling.size, aes(x=year, y=logHeight)) + 
+  geom_boxplot()
+
+hist(seedling.size$logHeight)
+
+#I am running a model only with year as explanatory variable since there is not so many data of seedling size for all patches 
+
+#Model without random structure
+mod.1<-gls(logHeight ~ year,method = "REML", data = seedling.size)
+summary(mod.1)
+
+
+#GLMM nesting plot
+mod.2<-lme(logHeight~year,random = ~1 | Patch,data=seedling.size,method="REML")
+summary(mod.2)
+
+#GLMM nesting plot in patch. 
+mod.3<-lme(logHeight~year,random = ~1 | Patch/Plot,data=seedling.size,method="REML")
+summary(mod.3)
+
+#GLMM nesting plot but with random slope and intercept
+#mod.4<-lme(logHeight~year,random = ~logHeight | Patch,data=seedling.size,method="REML")
+#summary(mod.4)
+
+##GLMM nesting plot in patch but with random slope and intercept. 
+#mod.5<-lme(logHeight~year,random = ~logHeight | Patch/Plot,data=seedling.size,method="REML")
+#summary(mod.5)
+
+#Select best model
+Weights(AIC(mod.1,mod.2,mod.3)) #mod.3 was the best one, whic states no differences between years in seedling size, so I will use the data of the two years to set the seedling size
+```
+
+
+```{r}
+#Number of seedlings found in demographic plots per year
+num.seedlings.observed<-seedling.size %>% 
+  group_by(year,Patch,Plot) %>% 
+  summarise(num.seedlings=n()) %>% 
+  ungroup() %>% 
+  inner_join(agg.openess,by="Patch") %>% 
+  mutate(log.num.seedlings=log(num.seedlings))
+
+num.seedlings.observed %>% 
+  select(log.num.seedlings,logpatch_size,percent_forest,elevation,mean_openess,year) %>% 
+           ggpairs(upper=list(continuous="points"),lower=list(continuous="cor"))
+  
+  #Model without random structure
+mod.1<-gls(log,num.seedlings ~ scale(logpatch_size) + scale(percent_forest) + scale(elevation) + scale(mean_openess) + year,method = "REML", data = num.seedlings.observed)
+summary(mod.1)
+
+
+#GLMM nesting plot
+#mod.2<-lme(num.seedlings~scale(logpatch_size) + scale(percent_forest) + scale(elevation) + scale(mean_openess) + year,random = ~1 | Patch,data=num.seedlings.observed,method="REML")
+#summary(mod.2)
+
+#I could not run the mixed model so I will run a normal linear regression
+mod.1<-lm(log.num.seedlings ~ scale(logpatch_size) + scale(percent_forest) + scale(elevation) + scale(mean_openess) + year, data = num.seedlings.observed)
+summary(mod.1)
+
+#I do not knwo why the estimate for the mean_openness is giving NA, so I will take it out
+mod.2<-lm(log.num.seedlings ~ scale(logpatch_size) + scale(percent_forest) + scale(elevation) + year, data = num.seedlings.observed)
+summary(mod.2)
+
+#Without year
+mod.3<-lm(log.num.seedlings ~ scale(logpatch_size) + scale(percent_forest) + scale(elevation), data = num.seedlings.observed)
+summary(mod.3)
+
+#Without patch size
+mod.4<-lm(log.num.seedlings ~ scale(percent_forest) + scale(elevation), data = num.seedlings.observed)
+summary(mod.4)
+
+#Without percent forest
+mod.5<-lm(log.num.seedlings ~ scale(elevation), data = num.seedlings.observed)
+summary(mod.5)
+
+
+num.seedlings.observed %>% 
+  ggplot(aes(x=elevation,y=log.num.seedlings)) +
+  geom_point() +
+  geom_smooth(method="lm") + 
+  xlab("Elevation (m.a.s.l.)") +
+  ylab("Log number of seedlings")
+
+ggsave("Graphs/Clump/Number of seedlings observed vs elevation.jpg")
+  
+
+```
+
+
+
+```{r}
+
+#****ASK HELENE BECAUSE HERE WE MIGHT PUT INFORMATION ON THE GERMINATION EXPERIMENT FOR SEEDLING SIZE. Second year seedling data base. It is a seedling if it is a new individual and if it is labaled as a seedling
+for (i in 2:3){
+  for (k in 1:length(demographic.output[[i]])){
+
+        demographic.output[[i]][[k]]$p.vec$mean.seedling_size<-mean(seedling.size$logHeight)
+    demographic.output[[i]][[k]]$p.vec$sd.seedling_size<-sd(seedling.size$logHeight,na.rm=T)
+      #data.frame(subset(second_year,second_year$Patch==patches.id[i] & second_year$new=="Y" & second_year$seedling=="Y")[,6])
+  #colnames(demographic.output[[i]]$seedling_size)[1]<-"size"
+  #demographic.output[[i]]$seedling_size<-as.numeric(as.character(demographic.output[[i]]$seedling_size))
+  #demographic.output[[i]]$seedling_size$sizeOriginal<-demographic.output[[i]]$seedling_size$size
+  #demographic.output[[i]]$seedling_size$size<-log(demographic.output[[i]]$seedling_size$sizeOriginal)
+#par(mfrow=c(1,2))
+  #hist(demographic.output[[i]]$seedling_size$sizeOriginal,main=paste("Seedling size of patch",demographic.output[[i]]$data_growth_surv_fec$Patch[1]),xlab="Size")
+    #hist(demographic.output[[i]]$seedling_size$size,main=paste("Log seedling size of patch",demographic.output[[i]]$data_growth_surv_fec$Patch[1]),xlab="Log size")
+  }
+}
+
+#Remove objects generated for selecting model
+rm(list= grep("mod.", ls(), value = TRUE))
+#rm(seedling.size)
+
+```
+
+
+#Reproduction function for 2013-2015
+```{r}
+library("e1071")
+
+p.flower.fun.2013<-function(x,params) {
+  
+  #Probability of reproduction function
+  #u=exp(params$prob.rep.int+params$prob.rep.scale.elevation*params$cov.elevation + params$prob.rep.scale.100.minus.mean_openess*params$cov.100.minus.mean.openess + params$prob.rep.scale.size*x)
+  u=exp(params$prob.rep.int+params$prob.rep.elevation*params$cov.elevation + params$prob.rep.mean_openess*params$cov.mean.openess + params$prob.rep.size*x)
+  
+return(u/(1+u))
+#  return(sigmoid(u))
+}
+
+
+#Number of inflorescences function
+num.infl.fun<-function(x,params){
+  
+
+  #n<-exp(params$prob.rep.int+params$prob.rep.elevation*params$cov.elevation + params$prob.rep.mean_openess*params$cov.mean.openess + params$prob.rep.size*x)
+  #n[n<0]<-0
+  
+  n<-exp(params$num.inflor.int+params$num.inflor.size*x)
+  
+  return(n)
+}
+  
+#Number of bracts per inflorescence
+num.brcts.infl.fun<-function(x,params){
+    
+    #m<-params$mean.num.bract.per.infl.int + params$mean.num.bract.per.infl.scale.size*x + params$mean.num.bract.per.infl.scale.logpatch_size*params$cov.logpatch.size
+  m<-exp(params$mean.num.bract.per.infl.int + params$mean.num.bract.per.infl.size*x + params$mean.num.bract.per.infl.logpatch_size*params$cov.logpatch.size)
+    m[m<0]<-0
+    return(m)
+  
+  }
+```
+
+
+#Reproduction function for 2015-2017
+```{r}
+
+#Here I only include the probability of reproduction function since it was the only one that had year as a significant factor
+p.flower.fun.2015<-function(x,params) {
+  
+  #Probability of reproduction function
+  #u=exp(params$prob.rep.int+params$prob.rep.scale.elevation*params$cov.elevation + params$prob.rep.scale.100.minus.mean_openess*params$cov.100.minus.mean.openess + params$prob.rep.scale.size*x + params$prob.rep.year.2015)
+  u=exp(params$prob.rep.int+params$prob.rep.elevation*params$cov.elevation + params$prob.rep.mean_openess*params$cov.mean.openess + params$prob.rep.size*x + params$prob.rep.year.2015)
+  
+return(u/(1+u))
+}
+
+  
+```
+
+
+```{r}
+#Here I am adding a seedling survival function since I did an analysis and got coefficients
+
+#Number of inflorescences function
+seedling.surv.fun<-function(params){
+
+  
+  n<-params$seedling.surv.int+params$seedling.surv.elevation*params$cov.elevation
+  
+  return(n)
+}
+
+```
+
+```{r}
+#I will do a function to estimate the number of seeds produced by individuals of a certain size for 2013 and 2015. ATTENTION: NUMBER OF FLOWERS, FRUITS PER FLOWER, SEEDS PER FRUIT CAN VARY BETWEEN PATCHES. ASK ADAM IF INFORMATION IS AVAILABLE. *** IN THE MERROW CODE THEY SAY SOMETHING ABOUT INCLUDING ONLY INDIVIDUALS THAT FLOWER IN THE ESTIMATION OF CERTAIN VALUES, CHECK LATER WHAT DOES THAT MEAN
+#For 2013
+fec.fun.2013<-function(xp,x,params){
+  m<-p.flower.fun.2013(x,params) * num.infl.fun(x,params) * num.brcts.infl.fun(x,params) * params$number_flowers * params$fruits_per_flower * params$seeds_per_fruit * params$prob_germination * seedling.surv.fun(params) * #params$prob_surv_seedlings *
+    dnorm(xp,mean=params$mean.seedling_size,sd=params$sd.seedling_size)/(1-pnorm(min.size,params$mean.seedling_size,params$sd.seedling_size)) #I just added this line to avoid eviction
+  }
+
+
+#For 2015
+fec.fun.2015<-function(xp,x,params){
+  m<-p.flower.fun.2015(x,params) * num.infl.fun(x,params) * num.brcts.infl.fun(x,params) * params$number_flowers * params$fruits_per_flower * params$seeds_per_fruit * params$prob_germination * seedling.surv.fun(params) * #params$prob_surv_seedlings * 
+    dnorm(xp,mean=params$mean.seedling_size,sd=params$sd.seedling_size)/(1-pnorm(min.size,params$mean.seedling_size,params$sd.seedling_size)) #I just added this line to avoid eviction 
+
+}
+
+```
+
+
+
+#CREATE PROBABILITY MATRIX FROM GROWTH, SURVIVAL AND FECUNDITY FUNCTIONS
+
+```{r,echo=F,include=F}
+#CREATE PROBABILITY MATRIX FROM GROWTH AND SURVIVAL FUNCTIONS
+
+#GROWTH AND SURVIVAL
+#For first transition
+for(i in 2:2){
+  for (k in 1:length(demographic.output[[i]])){
+    
+    min.size=.9*min(c(demographic.output[[i]][[k]]$data_growth_surv_diff_canopy$size,demographic.output[[i]][[k]]$data_growth_surv_diff_canopy$sizeNext),na.rm=T)
+max.size=1.1*max(c(demographic.output[[i]][[k]]$data_growth_surv_diff_canopy$size,demographic.output[[i]][[k]]$data_growth_surv_diff_canopy$sizeNext),na.rm=T)
+n=100 # number of cells in the matrix
+b=min.size+c(0:n)*(max.size-min.size)/n # boundary points
+y=0.5*(b[1:n]+b[2:(n+1)]) # mesh points
+h=y[2]-y[1] # step size
+
+demographic.output[[i]][[k]]$y<-y
+
+#Running gorwth function to generate a nxn matrix of probabilities of growing
+demographic.output[[i]][[k]]$growth.matrix<-h*outer(y,y,growth.function,params=demographic.output[[i]][[k]]$p.vec)
+
+#Running survival function to generate a nxn matrix of probabilities of sruvivorship
+#demographic.output[[i]][[k]]$survival.matrix.2015<-h*outer(y,y,survival.fun.2015,params=demographic.output[[i]][[k]]$p.vec)
+
+#Runing survival function to generate a vector of probability of survivin given a specific size
+demographic.output[[i]][[k]]$survival.vector.2015<-survival.fun.2015(y,params=demographic.output[[i]][[k]]$p.vec)
+
+#Copy the growth matrix to create in the next line the growth.survival matrix
+demographic.output[[i]][[k]]$growth.survival.matrix<-demographic.output[[i]][[k]]$growth.matrix
+
+#Multiply all the individuals that are of a certain size (growth.matrix[,j] by the probability of surviving given that they are of a certain size (survival.vector.2015[j]))
+for(j in 1:n) demographic.output[[i]][[k]]$growth.survival.matrix[,j]=demographic.output[[i]][[k]]$growth.matrix[,j]*demographic.output[[i]][[k]]$survival.vector.2015[j]
+
+
+#Running fecundity function to generate a nxn matrix of probabilities of growing
+demographic.output[[i]][[k]]$fecundity.matrix<-h*outer(y,y,fec.fun.2013,params=demographic.output[[i]][[k]]$p.vec)
+
+demographic.output[[i]][[k]]$growth.fecundity.matrix<-demographic.output[[i]][[k]]$growth.survival.matrix+demographic.output[[i]][[k]]$fecundity.matrix
+
+  }
+  
+}
+
+
+
+#For second transition
+for(i in 3:3){
+  for (k in 1:length(demographic.output[[i]])){
+    
+    min.size=.9*min(c(demographic.output[[i]][[k]]$data_growth_surv_diff_canopy$size,demographic.output[[i]][[k]]$data_growth_surv_diff_canopy$sizeNext),na.rm=T)
+max.size=1.1*max(c(demographic.output[[i]][[k]]$data_growth_surv_diff_canopy$size,demographic.output[[i]][[k]]$data_growth_surv_diff_canopy$sizeNext),na.rm=T)
+n=100 # number of cells in the matrix
+b=min.size+c(0:n)*(max.size-min.size)/n # boundary points
+y=0.5*(b[1:n]+b[2:(n+1)]) # mesh points
+h=y[2]-y[1] # step size
+
+demographic.output[[i]][[k]]$y<-y
+
+#Running gorwth function to generate a nxn matrix of probabilities of growing
+demographic.output[[i]][[k]]$growth.matrix<-h*outer(y,y,growth.function,params=demographic.output[[i]][[k]]$p.vec)
+
+#Running survival function to generate a nxn matrix of probabilities of sruvivorship
+#demographic.output[[i]][[k]]$survival.matrix.2015<-h*outer(y,y,survival.fun.2015,params=demographic.output[[i]][[k]]$p.vec)
+
+#Runing survival function to generate a vector of probability of survivin given a specific size
+demographic.output[[i]][[k]]$survival.vector.2017<-survival.fun.2017(y,params=demographic.output[[i]][[k]]$p.vec)
+
+#Copy the growth matrix to create in the next line the growth.survival matrix
+demographic.output[[i]][[k]]$growth.survival.matrix<-demographic.output[[i]][[k]]$growth.matrix
+
+#Multiply all the individuals that are of a certain size (growth.matrix[,j] by the probability of surviving given that they are of a certain size (survival.vector.2015[j]))
+for(j in 1:n) demographic.output[[i]][[k]]$growth.survival.matrix[,j]=demographic.output[[i]][[k]]$growth.matrix[,j]*demographic.output[[i]][[k]]$survival.vector.2017[j]
+
+#Running fecundity function to generate a nxn matrix of probabilities of growing
+demographic.output[[i]][[k]]$fecundity.matrix<-h*outer(y,y,fec.fun.2015,params=demographic.output[[i]][[k]]$p.vec)
+
+demographic.output[[i]][[k]]$growth.fecundity.matrix<-demographic.output[[i]][[k]]$growth.survival.matrix+demographic.output[[i]][[k]]$fecundity.matrix
+
+  }
+  
+}
+
+#Graph growth kernel
+
+for(i in 2:length(demographic.output)){
+  for (k in 1:length(demographic.output[[i]])){
+
+    jpeg(filename=paste("Graphs/Clump/Demographic matrix patch ",demographic.output[[i]][[k]]$data$Patch[1],".jpg",sep=""),width = 1000, height = 500,quality=100,res=150)
+par(mfrow=c(1,3))
+    
+    image.plot(demographic.output[[i]][[k]]$y,demographic.output[[i]][[k]]$y,t(demographic.output[[i]][[k]]$growth.survival.matrix),
+           main=paste("Growth + survival at patch",demographic.output[[i]][[k]]$data$Patch[1]),xlab="Size at t",ylab="Size at t+1")
+abline(0,1,col="white",lwd=2)
+contour(demographic.output[[i]][[k]]$y,demographic.output[[i]][[k]]$y,t(demographic.output[[i]][[k]]$growth.survival.matrix), add = TRUE, drawlabels = TRUE)
+
+#Fecundity
+image.plot(demographic.output[[i]][[k]]$y,demographic.output[[i]][[k]]$y,t(demographic.output[[i]][[k]]$fecundity.matrix),
+           main=paste("Fecundity at patch",demographic.output[[i]][[k]]$data$Patch[1]),xlab="Size at t",ylab="")
+abline(0,1,col="white",lwd=2)
+contour(demographic.output[[i]][[k]]$y,demographic.output[[i]][[k]]$y,t(demographic.output[[i]][[k]]$fecundity.matrix), add = TRUE, drawlabels = TRUE)
+
+#Growth, survival and Fecundity
+image.plot(demographic.output[[i]][[k]]$y,demographic.output[[i]][[k]]$y,t(demographic.output[[i]][[k]]$growth.fecundity.matrix),
+           main=paste("G, S and F at patch",demographic.output[[i]][[k]]$data$Patch[1]),xlab="Size at t",ylab="")
+abline(0,1,col="white",lwd=2)
+contour(demographic.output[[i]][[k]]$y,demographic.output[[i]][[k]]$y,t(demographic.output[[i]][[k]]$growth.fecundity.matrix), add = TRUE, drawlabels = TRUE)
+
+dev.off()
+  }
+}
+
+
+#I THINK IS WEIRD THAT FECUNDITY IS TOO HIGH, SO THAT IS WHY YOU CAN BARELY SEE THE GROWTH WHEN YOU MIX DE MATRICES
+
+
+
+
+#****************IMPORTANT TO CHECK DIAGNOSTIC PLOTS LATER#
+#Diagnostics of the P matrix
+#diagnosticsPmatrix(demographic.output[[i]]$Pmatrix, growObj = demographic.output[[i]]$growth, survObj = demographic.output[[i]]$survival, dff=demographic.output[[i]]$data_growth_surv,
+#                   correction = "constant")
+
+#}
+
+#rm(data_growth_surv_diff_canopy,survival.fun.2015,survival.fun.2017)
+
+#rm(survival.fun.2015,survival.fun.2017,min.size,max.size,n,b,y,h)
+
+
+#Visualizing the IPM kernel via the function IPMpack built-in function "contourPlot", 
+#which creates contour plots:
+#image(c(0, Pmatrix10@meshpoints),c(0, Pmatrix10@meshpoints),t(Pmatrix10), xlab="Size (t)",
+#      ylab="Size (t+1)",col=heat.colors(30), main="Kernel",zlim=c(0,0.03))
+#contour(Pmatrix10@meshpoints,Pmatrix10@meshpoints,t(Pmatrix10), add = TRUE,
+#        drawlabels = TRUE)
+#abline(0,1,col="black",lty=2,lwd=3)
+
+```
+
+
+
+```{r}
+#Obtain the length of the data frame by multiplying number of plot by the number of years
+l<-(length(demographic.output)-1)*length(demographic.output[[1]])
+
+#Make data frame
+num.seedlings<-data.frame(Patch=1:l,
+                          year=0,
+           num.seedlings=0)
+
+#Substract the information from fecundity matrices
+for(i in 2:2){
+  for (k in 1:length(demographic.output[[i]])){
+num.seedlings$Patch[k]<-demographic.output[[i]][[k]]$data$Patch[1]
+num.seedlings$year[k]<-as.numeric(as.character(demographic.output[[i]][[k]]$data$year[1]))
+num.seedlings$num.seedlings[k]<-sum(demographic.output[[i]][[k]]$fecundity.matrix)
+    
+  }
+}
+
+for(i in 3:3){
+  for (k in 1:length(demographic.output[[i]])){
+num.seedlings$Patch[k+(l/2)]<-demographic.output[[i]][[k]]$data$Patch[1]
+num.seedlings$year[k+(l/2)]<-as.numeric(as.character(demographic.output[[i]][[k]]$data$year[1]))
+num.seedlings$num.seedlings[k+(l/2)]<-sum(demographic.output[[i]][[k]]$fecundity.matrix)
+    
+  }
+}
+
+#Merge with environmental variables
+num.seedlings<- num.seedlings %>% 
+  mutate(Patch=as.factor(Patch),
+         log.num.seedlings=log(num.seedlings)) %>% 
+  inner_join(agg.openess,by="Patch")
+
+#Plot pairs
+num.seedlings %>% 
+  select(num.seedlings,logpatch_size,percent_forest,elevation,mean_openess,year) %>% 
+ggpairs(upper=list(continuous="points"),lower=list(continuous="cor"))
+
+#Plot pairs
+num.seedlings %>% 
+  select(log.num.seedlings,logpatch_size,percent_forest,elevation,mean_openess,year) %>% 
+ggpairs(upper=list(continuous="points"),lower=list(continuous="cor"))
+
+
+#Model without random factor
+mod.1<-gls(log.num.seedlings ~ scale(logpatch_size) + scale(percent_forest) + scale(elevation)+scale(mean_openess)+year,method = "REML", data = num.seedlings)
+summary(mod.1)
+
+
+#GLMM nesting plot
+mod.2<-lme(log.num.seedlings~scale(logpatch_size) + scale(percent_forest) + scale(elevation)+scale(mean_openess)+year,random = ~1 | Patch,data=num.seedlings,method="REML")
+summary(mod.2)
+
+#Without patch size
+mod.3<-lme(log.num.seedlings~scale(percent_forest) + scale(elevation)+scale(mean_openess)+year,random = ~1 | Patch,data=num.seedlings,method="REML")
+summary(mod.3)
+
+#Without percent forest
+mod.4<-lme(log.num.seedlings~scale(elevation)+scale(mean_openess)+year,random = ~1 | Patch,data=num.seedlings,method="REML")
+summary(mod.4)
+
+#Without mean openness
+mod.5<-lme(log.num.seedlings~scale(elevation)+year,random = ~1 | Patch,data=num.seedlings,method="REML")
+summary(mod.5)
+
+#Without elevation
+mod.6<-lme(log.num.seedlings~year,random = ~1 | Patch,data=num.seedlings,method="REML")
+summary(mod.6)
+
+#Plot number of seedlings between years
+num.seedlings %>% 
+  mutate(year=as.factor(year)) %>% 
+  ggplot(aes(x=year,y=num.seedlings)) +
+  geom_boxplot() +
+  xlab("Year") +
+  ylab("Number of seedlings established")
+
+#ggsave("Graphs/Clump/Number of seedlings from fecundity matrix per year.jpg")
+
+```
+
+
+
+
+
+
+
+```{r}
+#Here I am transforming the matrix I made to an IPM object to continue analyzing data
+for(i in 2:length(demographic.output)){
+  for (k in 1:length(demographic.output[[i]])){
+
+demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format = new("IPMmatrix", nDiscrete = 0, nEnvClass = 0,
+nBigMatrix = n, nrow = n, ncol = n, meshpoints = y,
+env.index = 0) #It had ", names.discrete = )" at the original code but some value is missing and I do not know which one. I took it out
+
+demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format[,] = demographic.output[[i]][[k]]$growth.fecundity.matrix
+  }
+}
+```
+
+
+```{r}
+#This is not working well. See why
+for(i in 2:length(demographic.output)){
+  for (k in 1:length(demographic.output[[i]])){
+targetSize<-log(20)
+passage <- passageTime(targetSize, demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format)
+    plot(demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format@meshpoints, passage, ylab = "Passage time",
+xlab = "Continuous (e.g. size) stage", type = "l", col = "dark gray", ylim = c(0, 60), xlim=c(1,targetSize+1), main=paste("Patch",demographic.output[[i]][[k]]$data$Patch[1]))
+  }
+  }
+
+```
+
+
+
+```{r}
+#Calculate lambdas
+for(i in 2:length(demographic.output)){
+  for (k in 1:length(demographic.output[[i]])){
+  
+demographic.output[[i]][[k]]$lambda<-Re(eigen(demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format)$values[1])
+  
+print(demographic.output[[i]][[k]]$lambda)
+  }
+}
+
+```
+
+
+
+```{r}
+
+for(i in 2:length(demographic.output)){
+  for (k in 1:length(demographic.output[[i]])){
+
+w.eigen <- Re(eigen(demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format)$vectors[,1])
+stable.dist <- w.eigen/sum(w.eigen)
+v.eigen <- Re(eigen(t(demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format))$vectors[,1])
+repro.val <- v.eigen/v.eigen[1]
+
+
+#The eigen-things can be combined to obtain the sensitivity and elasticity matrices.
+v.dot.w=sum(stable.dist*repro.val)*h
+
+demographic.output[[i]][[k]]$sensitivity=outer(repro.val,stable.dist)/v.dot.w
+demographic.output[[i]][[k]]$elasticity=matrix(as.vector(demographic.output[[i]][[k]]$sensitivity)*as.vector(demographic.output[[i]][[k]]$growth.fecundity.matrix)/demographic.output[[i]][[k]]$lambda,nrow=n)
+  
+}
+  }
+```
+
+
+
+```{r}
+#NOT RUN THIS BECAUSE I DO NOT THINK IT IS SO USEFULL AND I DO NOT KNOW IF I DID IT CORRECTLY
+#Obtain sum of elasticities of growth and survival
+#elas_lambdas<-data.frame(Patch=numeric(),Growth_Survival=numeric(),Fecundity=numeric(),sum_elas=numeric(),lambda=numeric())
+
+
+#for (i in 1:length(demographic.output)){
+
+#demographic.output[[i]][[k]]$elasPMatrix<-demographic.output[[i]]$Pmatrix*demographic.output[[i]]$sensitivity/demographic.output[[i]]$lambda
+
+#Elasticities for fecundity
+#demographic.output[[i]]$elasFMatrix<-demographic.output[[i]]$Fmatrix*demographic.output[[i]]$sensitivity/demographic.output[[i]]$lambda
+
+#elas_lambdas[i,1]<-demographic.output[[i]]$data_growth_surv_fec$Patch[1]
+#elas_lambdas[i,2]<-sum(demographic.output[[i]]$elasPMatrix)
+#elas_lambdas[i,3]<-sum(demographic.output[[i]]$elasFMatrix)
+#elas_lambdas[i,4]<-sum(elas_lambdas[i,2],elas_lambdas[i,3])
+#elas_lambdas[i,5]<-round(demographic.output[[i]]$lambda,2)
+
+
+#}
+#Merge elasticities with information of patch size and proportion of forest
+#elas_lambdas<-merge(elas_lambdas,patches,by="Patch",all=F)
+
+```
+
+```{r}
+
+##2 elasticity of growth and fecudity exceed 1. Check
+#elas_lambdas
+```
+
+```{r,include=F}
+#Function for creating pairs plot
+panel.hist <- function(x, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(usr[1:2], 0, 1.5) )
+    h <- hist(x, plot = FALSE)
+    breaks <- h$breaks; nB <- length(breaks)
+    y <- h$counts; y <- y/max(y)
+    rect(breaks[-nB], 0, breaks[-1], y, col = "cyan", ...)
+}
+
+
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(0, 1, 0, 1))
+    r <- abs(cor(x, y))
+    txt <- format(c(r, 0.123456789), digits = digits)[1]
+    txt <- paste0(prefix, txt)
+    if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+    text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+```
+
+```{r,include=F}
+
+#
+#pairs(elas_lambdas[,-1],upper.panel=panel.smooth,diag.panel=panel.hist,panel=panel.cor)
+
+#elas_lambdas$logpercent_forest<-log(elas_lambdas$percent_forest)
+#elas_lambdas$logpatch_size<-log(elas_lambdas$patch_size)
+
+#I cannot transfrom growth and survival
+#par(mfrow=c(1,2))
+#hist(elas_lambdas$Fecundity)
+#hist(log(elas_lambdas$Fecundity))
+#elas_lambdas$logGrowth_Survival<-log(elas_lambdas$Growth_Survival)
+#elas_lambdas$logFecundity<-log(elas_lambdas$Fecundity)
+#elas_lambdas$transfGrowth_Survival<-sqrt(asin(elas_lambdas$Growth_Survival))
+#elas_lambdas$transfFecundity<-sqrt(asin(elas_lambdas$Fecundity))
+```
+
+```{r}
+#pairs(elas_lambdas[c("lambda","Growth_Survival","logFecundity","logpatch_size","logpercent_forest","elevation")],upper.panel=panel.smooth,diag.panel=panel.hist,panel=panel.cor)
+
+
+```
+
+```{r}
+#Analyze lambda with environmental information
+#Create data frame for putting the information of lambdas with environmental variables of each patch. I am creating one data frame per year
+lambda.analysis<-lambda.analysis2<-data.frame(Patch=1:length(demographic.output[[i]]),lambda=0,log.patch.size=0,percent.forest=0,elevation=0,mean.canopy.openess=0,year=0)
+
+#Filling the patch column with the patch information
+for(i in 2:2){
+  for (k in 1:length(demographic.output[[i]])){
+    lambda.analysis[k,"Patch"]<-demographic.output[[i]][[k]]$data$Patch[1]
+  
+
+  }
+}
+
+for(i in 3:3){
+  for (k in 1:length(demographic.output[[i]])){
+    lambda.analysis2[k,"Patch"]<-demographic.output[[i]][[k]]$data$Patch[1]
+  
+
+  }
+}
+
+
+#Filling each column with the information of each patch
+for(i in 2:2){
+  for (k in 1:length(demographic.output[[i]])){
+    for (g in 1:nrow(lambda.analysis))
+    if(lambda.analysis[g,"Patch"]==demographic.output[[i]][[k]]$data$Patch[1]){
+    lambda.analysis[g,"lambda"]<-demographic.output[[i]][[k]]$lambda
+    lambda.analysis[g,"log.patch.size"]<-demographic.output[[i]][[k]]$p.vec$cov.logpatch.size
+    lambda.analysis[g,"percent.forest"]<-demographic.output[[i]][[k]]$p.vec$cov.percent.forest
+    lambda.analysis[g,"elevation"]<-demographic.output[[i]][[k]]$p.vec$cov.elevation
+    lambda.analysis[g,"mean.canopy.openess"]<-demographic.output[[i]][[k]]$p.vec$cov.mean.openess
+    lambda.analysis[g,"year"]<-ifelse(i==2,2013,2015)
+  
+    }
+  }
+}
+
+
+for(i in 3:3){
+  for (k in 1:length(demographic.output[[i]])){
+    for (g in 1:nrow(lambda.analysis2))
+    if(lambda.analysis2[g,"Patch"]==demographic.output[[i]][[k]]$data$Patch[1]){
+    lambda.analysis2[g,"lambda"]<-demographic.output[[i]][[k]]$lambda
+    lambda.analysis2[g,"log.patch.size"]<-demographic.output[[i]][[k]]$p.vec$cov.logpatch.size
+    lambda.analysis2[g,"percent.forest"]<-demographic.output[[i]][[k]]$p.vec$cov.percent.forest
+    lambda.analysis2[g,"elevation"]<-demographic.output[[i]][[k]]$p.vec$cov.elevation
+    lambda.analysis2[g,"mean.canopy.openess"]<-demographic.output[[i]][[k]]$p.vec$cov.mean.openess
+    lambda.analysis2[g,"year"]<-ifelse(i==3,2015,2013)
+  
+    }
+  }
+}
+
+#Generating one data base
+lambda.analysis<-rbind(lambda.analysis,lambda.analysis2)
+
+#Setting year as factor
+lambda.analysis$year<-as.factor(lambda.analysis$year)
+
+#removing the data base that I will not use
+rm(lambda.analysis2)
+```
+
+
+```{r}
+lambda.analysis %>% 
+  mutate(Patch=as.factor(Patch),
+         year=as.numeric(as.character(year))) %>% 
+  inner_join(density.patch,by=c("Patch","year")) %>% 
+  ggplot(aes(x=density,y=lambda)) +
+  geom_point() +
+  geom_smooth(method="lm")
+
+
+
+lambda.analysis %>% 
+    mutate(Patch=as.factor(Patch)) %>% 
+    inner_join(density.reproductive,by=c("Patch","year")) %>% 
+  ggplot(aes(x=density,y=lambda)) +
+  geom_point() +
+  geom_smooth(method="lm")
+
+
+```
+
+
+```{r}
+#I TRIED WITH DENSITY AND DENSITY OF REPRODUCTIVE INDIVIDUALS BUT DID NOT FIND SIGNIFICANT RELATIONSHIP
+#Visual inspection of data frame
+pairs(lambda.analysis[c("lambda","log.patch.size","percent.forest","elevation","mean.canopy.openess","year")],upper.panel=panel.smooth,diag.panel=panel.hist,panel=panel.cor)
+
+#Model without random factor
+mod.1<-gls(lambda ~ scale(log.patch.size) + scale(percent.forest) + scale(elevation)+scale(mean.canopy.openess)+year,method = "REML", data = lambda.analysis)
+summary(mod.1)
+
+
+#GLMM nesting plot
+mod.2<-lme(lambda~scale(log.patch.size) + scale(percent.forest) + scale(elevation)+scale(mean.canopy.openess)+year,random = ~1 | Patch,data=lambda.analysis,method="REML")
+summary(mod.2)
+
+#I will continue with model 2 since it has the lowest AIC
+#Without patch sie
+mod.3<-lme(lambda~ scale(percent.forest) + scale(elevation)+scale(mean.canopy.openess)+year,random = ~1 | Patch,data=lambda.analysis,method="REML")
+summary(mod.3)
+
+#Without canopy openess
+mod.4<-lme(lambda~ scale(percent.forest) + scale(elevation)+year,random = ~1 | Patch,data=lambda.analysis,method="REML")
+summary(mod.4)
+
+#Without percent of forest
+mod.5<-lme(lambda~ scale(elevation)+year,random = ~1 | Patch,data=lambda.analysis,method="REML")
+summary(mod.5)
+
+#Without elevation
+mod.6<-lme(lambda~year,random = ~1 | Patch,data=lambda.analysis,method="REML")
+summary(mod.6)
+
+Weights(AIC(mod.2,mod.3,mod.4,mod.5,mod.6))
+
+#plot
+
+lambda.analysis %>%
+  ggplot(aes(x=year,y=lambda)) + 
+  geom_boxplot() +
+  geom_hline(yintercept=1,col="red",linetype="dashed",size=1.05) +
+  xlab("Year") +
+  ylab("Lambda")
+ggsave("Graphs/Clump/lambda vs year.jpg")
+
+lambda.analysis %>% 
+  mutate(Patch=as.factor(Patch)) %>% 
+  ggplot(aes(x=year,y=lambda,group=Patch,color=Patch)) +
+  geom_point() +
+  geom_line() +
+  geom_hline(yintercept=1,col="red",linetype="dashed",size=1.05) +
+  theme(legend.position="bottom") +
+  guides(fill=guide_legend(nrow=2,byrow=T)) +
+  xlab("Year") +
+  ylab("Lambda")
+ggsave("Graphs/Clump/lambda vs year by patch.jpg")
+
+p1<-lambda.analysis %>%
+  ggplot(aes(x=log.patch.size,y=lambda)) + 
+  geom_point() +
+  geom_smooth(method="lm",col="red") +
+  xlab("Log patch size") +
+  ylab("Lambda")
+
+p2<-lambda.analysis %>%
+  ggplot(aes(x=percent.forest,y=lambda)) + 
+  geom_point() +
+  geom_smooth(method="lm",col="red") +
+  xlab("Proportion of forest") +
+  ylab("Lambda")
+
+p3<-lambda.analysis %>%
+  ggplot(aes(x=elevation,y=lambda)) + 
+  geom_point() +
+  geom_smooth(method="lm",col="red") +
+  xlab("Elevation (m.a.s.l.)") +
+  ylab("Lambda")
+
+p4<-lambda.analysis %>%
+  ggplot(aes(x=mean.canopy.openess,y=lambda)) + 
+  geom_point() +
+  geom_smooth(method="lm",col="red") +
+  xlab("Mean canopy openness (%)") +
+  ylab("Lambda")
+
+library("gridExtra")
+p5<-grid.arrange(p1, p2,p3,p4, ncol=2,nrow=2)
+ggsave("Graphs/Clump/Lambda vs variables.jpg",plot=p5)
+
+rm(p1,p2,p3,p4,p5)
+
+```
+
+
+```{r}
+#SENSITIVITY ANALYSIS. CANNOT DO IT BECAUSE MY DATA BASE IS NOT IN THE CORRESPONDING FORMAT. I NEED GROWOBJ, SURVONBJ AND FECOBJ BUT I ONLY HAVE A MATRIX OF TRANSITIONS
+#sensitivityOutput<-sensParams(growObj=go, survObj=so, fecObj=fo, clonalObj=co,
+#nBigMatrix=50, minSize=minSize, maxSize=maxSize)
+#barplot(sensitivityOutput$elas,
+#main = expression("Parameter elasticity of population growth rate "* lambda),
+#las = 2, cex.names = 0.5)
+
+```
+
+
+```{r}
+#Lambda statistics per year
+tapply(lambda.analysis$lambda,lambda.analysis$year,summary)
+
+#Count lambdas by year to know how many are above or below 1
+lambda.analysis %>% 
+  mutate(l.status=if_else(lambda>=1,"increase","decrease")) %>% 
+  group_by(year,l.status) %>% 
+  summarise(n())
+
+#Order data base by lambda value
+lambda.analysis<-lambda.analysis[order(lambda.analysis$year,-lambda.analysis$lambda),]
+lambda.analysis[,c("Patch","lambda","year")]
+
+#Give a rank to each lambda value per year. I do this by diving by 2 the length of the data frame assuming that I sampled the same patch in two years
+lambda.analysis$rank<-rep(seq(from=1,to=(nrow(lambda.analysis)/2),by=1),2)
+
+```
+
+#Elasticities year 2013
+```{r}
+for(i in 2:2){
+  for (k in 1:length(demographic.output[[i]])){
+
+    #year<-ifelse(i==2,2013,2015) #Did not work for filtering
+    #Order lambda according to their values and year and then subset the patch I am analyzing to know the rank
+    rank2<<-lambda.analysis %>% 
+      mutate(year=as.numeric(as.character(year))) %>% 
+      filter(year==2013 & Patch==demographic.output[[i]][[k]]$data$Patch[1])
+    
+    #save plot
+    jpeg(filename=paste("Graphs/Clump/Elasticity 2013 rank ",rank2[1,"rank"]," patch ",demographic.output[[i]][[k]]$data$Patch[1],".jpg",sep=""),width = 500, height = 500,quality=100,res=150)
+par(mfrow=c(1,1))
+image.plot(demographic.output[[i]][[k]]$y,demographic.output[[i]][[k]]$y,t(demographic.output[[i]][[k]]$elasticity),xlab="Size (t)",ylab="Size (t+1)", main=paste("Elasticity patch ",demographic.output[[i]][[k]]$data$Patch[1]))
+
+abline(0,1,col="white",lwd=2)
+
+dev.off()
+  }
+}
+```
+
+#Elasticities year 2015
+```{r}
+for(i in 3:3){
+  for (k in 1:length(demographic.output[[i]])){
+
+    #year<-ifelse(i==2,2013,2015) #Did not work for filtering
+    #Order lambda according to their values and year and then subset the patch I am analyzing to know the rank
+    rank2<<-lambda.analysis %>% 
+      mutate(year=as.numeric(as.character(year))) %>% 
+      filter(year==2015 & Patch==demographic.output[[i]][[k]]$data$Patch[1])
+    
+    #save plot
+    jpeg(filename=paste("Graphs/Clump/Elasticity 2015 rank ",rank2[1,"rank"]," patch ",demographic.output[[i]][[k]]$data$Patch[1],".jpg",sep=""),width = 500, height = 500,quality=100,res=150)
+par(mfrow=c(1,1))
+image.plot(demographic.output[[i]][[k]]$y,demographic.output[[i]][[k]]$y,t(demographic.output[[i]][[k]]$elasticity),xlab="Size (t)",ylab="Size (t+1)", main=paste("Elasticity patch ",demographic.output[[i]][[k]]$data$Patch[1]))
+
+abline(0,1,col="white",lwd=2)
+
+dev.off()
+  }
+}
+
+
+
+
+t(demographic.output[[3]][[12]]$elasticity) %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  tidyr::gather(measure, value, -rowname) %>%
+  mutate(
+    measure = as.numeric(
+      stringr::str_extract(measure, '[0-9]+')
+      ), 
+    rowname = as.numeric(rowname),
+    value = as.numeric(value)) %>%
+  ggplot(aes(x = rowname, y = measure, fill = value)) +
+  geom_raster(interpolate=T) +
+  geom_abline(intercept = 0, slope = 1, color = 'white') +
+  scale_fill_distiller(palette = "Spectral")
+
+```
+
+
+##Elasticities triangle
+```{r}
+
+#Make a matrix that indicates if the values are on the upper or lower part of the matrix
+zones.matrix.upper<-upper.tri(t(demographic.output[[3]][[1]]$elasticity))
+zones.matrix.upper<-ifelse(zones.matrix.upper==TRUE,1,0)
+
+zones.matrix.lower<-upper.tri(t(demographic.output[[3]][[1]]$elasticity))
+zones.matrix.lower<-ifelse(zones.matrix.lower==FALSE,1,0)
+
+
+#Store a matrix of the same size as the elasticity matrix
+for(i in 2:length(demographic.output)){
+  for (k in 1:length(demographic.output[[i]])){
+
+    demographic.output[[i]][[k]]$elasticity.growth<-t(demographic.output[[i]][[k]]$elasticity)
+    demographic.output[[i]][[k]]$elasticity.shrink<-t(demographic.output[[i]][[k]]$elasticity)
+    demographic.output[[i]][[k]]$elasticity.rep<-t(demographic.output[[i]][[k]]$elasticity)
+    
+    #Multiply the elasticity by the matrix that indicates that a value is in the upper part of the matrix
+    demographic.output[[i]][[k]]$elasticity.growth<-zones.matrix.upper*demographic.output[[i]][[k]]$elasticity.growth
+    
+  }
+  }
+
+
+
+
+for(i in 2:length(demographic.output)){
+  for (k in 1:length(demographic.output[[i]])){
+
+for (m in 1:ncol(demographic.output[[i]][[k]]$elasticity)){
+  for (n in 1:nrow(demographic.output[[i]][[k]]$elasticity)){
+  #I do not know how to separate shrinkage from reproduction, so I selected a thrshold of values that I consider will be most likely from the reproductive part than from shrinkage. Here then I check that each of the values in the matrix fulfills this condition
+    demographic.output[[i]][[k]]$elasticity.shrink[m,n]<-ifelse(t(demographic.output[[i]][[k]]$elasticity[m,n])>0.0017,t(demographic.output[[i]][[k]]$elasticity[m,n]),0)
+    demographic.output[[i]][[k]]$elasticity.rep[m,n]<-ifelse(t(demographic.output[[i]][[k]]$elasticity[m,n])<=0.0017,t(demographic.output[[i]][[k]]$elasticity[m,n]),0)
+    
+    
+  }}
+    
+    #Select only the lower part of the matrix
+    demographic.output[[i]][[k]]$elasticity.shrink<-zones.matrix.lower*t(demographic.output[[i]][[k]]$elasticity.shrink)
+    demographic.output[[i]][[k]]$elasticity.rep<-zones.matrix.lower*t(demographic.output[[i]][[k]]$elasticity.rep)
+    
+    #Create plots
+    jpeg(filename=paste("Graphs/Clump/Elasticity three procesess",demographic.output[[i]][[k]]$data$year[1]," patch ",demographic.output[[i]][[k]]$data$Patch[1],".jpg",sep=""),width = 1500, height = 1000,quality=100,res=150)
+    par(mfrow=c(1,4),mar=c(3,3,3,3))
+    
+    image.plot(t(demographic.output[[i]][[k]]$elasticity),main="Original")
+    mtext(paste("Year ",demographic.output[[i]][[k]]$data$year[1],"Patch ",demographic.output[[i]][[k]]$data$Patch[1],sep=""),side=3)
+    
+    image.plot(demographic.output[[i]][[k]]$elasticity.growth,main="Growth")
+    mtext(round(sum(demographic.output[[i]][[k]]$elasticity.growth),2),side=3)
+    
+    image.plot(demographic.output[[i]][[k]]$elasticity.shrink,main="Retrgoression")
+    mtext(round(sum(demographic.output[[i]][[k]]$elasticity.shrink),2),side=3)
+    
+    image.plot(demographic.output[[i]][[k]]$elasticity.rep,main="Reproduction")
+    mtext(round(sum(demographic.output[[i]][[k]]$elasticity.rep),2),side=3)
+    dev.off()
+}}
+
+
+
+
+```
+
+
+
+```{r}
+#Create a data frame to analyze the elasticity values per patch and year
+
+#Create an empty data frame
+elasticity.values<-data.frame(Patch=0,year=rep(c(2015,2017),each=12),growth=0,shrink=0,reproduction=0)
+
+#Fill each row with the information of the elasticity per vital rate per patch and year
+for(i in 2:length(demographic.output)){
+  for (k in 1:length(demographic.output[[i]])){
+    
+    if(i==2){
+    
+    elasticity.values[k,"Patch"]<-demographic.output[[i]][[k]]$data$Patch[1]
+    elasticity.values[k,"year"]<-as.numeric(as.character(demographic.output[[i]][[k]]$data$year[1]))
+    elasticity.values[k,"growth"]<-sum(demographic.output[[i]][[k]]$elasticity.growth)
+    elasticity.values[k,"shrink"]<-sum(demographic.output[[i]][[k]]$elasticity.shrink)
+    elasticity.values[k,"reproduction"]<-sum(demographic.output[[i]][[k]]$elasticity.rep)
+    }
+
+    #I did this so that each elasticity value is introduced in the correct row
+    else{
+  elasticity.values[k+length(demographic.output[[i]]),"Patch"]<-demographic.output[[i]][[k]]$data$Patch[1]
+    elasticity.values[k+length(demographic.output[[i]]),"year"]<-as.numeric(as.character(demographic.output[[i]][[k]]$data$year[1]))
+    elasticity.values[k+length(demographic.output[[i]]),"growth"]<-sum(demographic.output[[i]][[k]]$elasticity.growth)
+    elasticity.values[k+length(demographic.output[[i]]),"shrink"]<-sum(demographic.output[[i]][[k]]$elasticity.shrink)
+    elasticity.values[k+length(demographic.output[[i]]),"reproduction"]<-sum(demographic.output[[i]][[k]]$elasticity.rep)
+  
+}
+    
+  }
+  }
+
+#Merging elasticites with patch size, proportion of forest, elevation and canopy openness
+elasticity.values<-elasticity.values %>% 
+  mutate(year=year-2) %>% 
+  mutate(year=as.factor(year)) %>% 
+  inner_join(lambda.analysis,by=c("Patch","year"))
+
+```
+
+
+```{r}
+#Plots
+
+#Pairs plots
+library("GGally")
+ggpairs(elasticity.values,upper=list(continuous="points"),lower=list(continuous="cor"))
+
+#Summary of elasticity values per demographic vital rate
+elasticity.values %>% 
+  select(growth,shrink,reproduction) %>% 
+  summary()
+
+#Elasticity value vs lambda
+p1<-elasticity.values %>% 
+  select(growth,shrink,reproduction) %>% 
+  gather(elasticity,value) %>% 
+  ggplot(aes(x=elasticity,y=value)) +
+    geom_boxplot() +
+  xlab("Demographic vital rate") +
+  ylab("Elasticity") +
+  scale_x_discrete(labels = c("Growth", "Reproduction", "Shrinkage")) 
+  
+
+
+ggsave("Graphs/Clump/elasticities per vital rate.jpg")
+
+#Elasticity value per demographic vital rate
+p2<-elasticity.values %>% 
+  select(lambda,growth,shrink,reproduction) %>% 
+  gather(elasticity,value,-lambda) %>% 
+  ggplot(aes(x=lambda,y=value)) +
+    geom_point(aes(colour=elasticity)) + 
+    geom_smooth(aes(group=elasticity),method="lm",color="red") +
+  xlab("Lambda") + 
+  ylab("Elasticity") +
+  scale_colour_discrete(name = "Year", labels = c("Growth", "Reproduction", "Shrinkage"))
+  #scale_color_manual(name="",labels=c("Growth","Reproduction","Shrinkage"))
+ 
+ggsave("Graphs/Clump/elasticities vs lambda.jpg")
+
+library("gridExtra")
+p3<-grid.arrange(p1, p2, ncol=2)
+ggsave("Graphs/Clump/Elasticity per vital rate and lambda.jpg",plot=p3)
+
+#Correlation between elasticity values for each demographic vital rate
+elasticity.values %>% 
+  select(growth,shrink,reproduction) %>% 
+  ggpairs(upper=list(continuous="points"),lower=list(continuous="cor"))
+
+
+rm(p1,p2,p3)
+
+```
+
+
+#LTRE for 2013
+```{r}
+#unique(data[,c('Patch','percent_forest','patch_size')])
+#Call control IPM1 conditions. 
+#MAKE LTRE CODE FOR SELECTING THE PATCH WITH THE HIGHTEST LAMBDA AND THEN COMPARE WITH OTHER PATCHES AND AUTOMATICALLY PUT LAMBDA VALUE. DO THAT FOR PATCHES OF SAME YEAR AND FOR SAME PATCHES BUT BETWEEN YEARS
+
+#This code if for selecing the patch matrix that has the highest lambda value so that I can use it as a reference patch
+for(i in 2:2){
+  for (k in 1:length(demographic.output[[i]])){
+
+    
+    #year<-ifelse(i==2,2013,2015) 
+    #Filter lambdas by year. The data frame is already ordered by lambda value
+    rank2<<-lambda.analysis %>% 
+      filter(year==2013)
+    
+    #Go through all the matrices per patch. If the patch id is equal to the patch id of the lambda with the highest value, then subset the matrix and the lambda value
+    if(demographic.output[[i]][[k]]$data$Patch[1]==rank2[1,1]){
+      
+      hightest.matrix.2013<<-demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format
+      
+      highest.lambda.2013<<-demographic.output[[i]][[k]]$lambda
+    }
+  }
+}
+  
+for(i in 2:2){
+  for (k in 1:length(demographic.output[[i]])){
+    
+    #Go through all the matrices per patch. If the patch id is different to the patch id of the lambda with the highest value, then perform the LTRE
+    if(demographic.output[[i]][[k]]$data$Patch[1]!=rank2[1,1]){
+    
+    #year<-ifelse(i==2,2013,2015)
+    
+    jpeg(filename=paste("Graphs/Clump/LTRE 2013 rank ",lambda.analysis[lambda.analysis$year==2013 & lambda.analysis$Patch==demographic.output[[i]][[k]]$data$Patch[1],"rank"], " patch ",rank2[rank2$year==2013,][1,1] ," with patch ",demographic.output[[i]][[k]]$data$Patch[1],".jpg",sep=""),width = 500, height = 500,quality=100,res=150)
+par(mfrow=c(1,1))
+
+
+
+    IPM.mid=(hightest.matrix.2013+demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format)/2
+    D=demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format-hightest.matrix.2013
+    sensIPM.mid=sens(IPM.mid)
+    Contrib=D*sensIPM.mid
+
+image.plot(c(0, demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format@meshpoints),c(0, demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format@meshpoints),t(Contrib), xlab="Size (t)",ylab="Size (t+1)",col=heat.colors(30), main=paste("LTRE of patch",rank2[rank2$year==2013,][1,1],"vs patch",demographic.output[[i]][[k]]$data$Patch[1]),zlim=c(min(Contrib),max(Contrib)))
+abline(a = 0, b = 1, lty= 2, col = "black", lwd=2)
+
+mtext(text=paste("lambdas:",round(highest.lambda.2013,2),"vs",round(demographic.output[[i]][[k]]$lambda,2)),side=3)
+
+dev.off()
+}
+  }
+}
+
+rm(rank2,hightest.matrix.2013,highest.lambda.2013)
+
+```
+
+
+#LTRE for 2015
+```{r}
+#unique(data[,c('Patch','percent_forest','patch_size')])
+#Call control IPM1 conditions. 
+#MAKE LTRE CODE FOR SELECTING THE PATCH WITH THE HIGHTEST LAMBDA AND THEN COMPARE WITH OTHER PATCHES AND AUTOMATICALLY PUT LAMBDA VALUE. DO THAT FOR PATCHES OF SAME YEAR AND FOR SAME PATCHES BUT BETWEEN YEARS
+
+
+for(i in 3:3){
+  for (k in 1:length(demographic.output[[i]])){
+
+    
+    #year<-ifelse(i==2,2013,2015) 
+    
+    rank2<<-lambda.analysis %>% 
+      filter(year==2015)
+    
+    #Go through all the matrices per patch. If the patch id is equal to the patch id of the lambda with the highest value, then subset the matrix and the lambda value
+    if(demographic.output[[i]][[k]]$data$Patch[1]==rank2[1,1]){
+      
+      hightest.matrix.2015<<-demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format
+      
+      highest.lambda.2015<<-demographic.output[[i]][[k]]$lambda
+    }
+  }
+}
+  
+for(i in 3:3){
+  for (k in 1:length(demographic.output[[i]])){
+    
+    #Go through all the matrices per patch. If the patch id is different to the patch id of the lambda with the highest value, then perform the LTRE
+    if(demographic.output[[i]][[k]]$data$Patch[1]!=rank2[1,1]){
+    
+    #year<-ifelse(i==2,2013,2015)
+    
+    jpeg(filename=paste("Graphs/Clump/LTRE 2015 rank ",lambda.analysis[lambda.analysis$year==2015 & lambda.analysis$Patch==demographic.output[[i]][[k]]$data$Patch[1],"rank"], " patch ",rank2[rank2$year==2015,][1,1] ," with patch ",demographic.output[[i]][[k]]$data$Patch[1],".jpg",sep=""),width = 500, height = 500,quality=100,res=150)
+par(mfrow=c(1,1))
+
+
+
+    IPM.mid=(hightest.matrix.2015+demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format)/2
+    D=demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format-hightest.matrix.2015
+    sensIPM.mid=sens(IPM.mid)
+    Contrib=D*sensIPM.mid
+
+image.plot(c(0, demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format@meshpoints),c(0, demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format@meshpoints),t(Contrib), xlab="Size (t)",ylab="Size (t+1)",col=heat.colors(30), main=paste("LTRE of patch",rank2[rank2$year==2015,][1,1],"vs patch",demographic.output[[i]][[k]]$data$Patch[1]),zlim=c(min(Contrib),max(Contrib)))
+abline(a = 0, b = 1, lty= 2, col = "black", lwd=2)
+
+mtext(text=paste("lambdas:",round(highest.lambda.2015,2),"vs",round(demographic.output[[i]][[k]]$lambda,2)),side=3)
+
+dev.off()
+}
+  }
+}
+#rm(rank2,hightest.matrix.2015,highest.lambda.2015)
+
+```
+
+
+
+#LTRE same patch different years
+```{r}
+#unique(data[,c('Patch','percent_forest','patch_size')])
+#Call control IPM1 conditions. 
+#MAKE LTRE CODE FOR SELECTING THE PATCH WITH THE HIGHTEST LAMBDA AND THEN COMPARE WITH OTHER PATCHES AND AUTOMATICALLY PUT LAMBDA VALUE. DO THAT FOR PATCHES OF SAME YEAR AND FOR SAME PATCHES BUT BETWEEN YEARS
+
+
+for (g in unique(lambda.analysis$Patch)){
+for(i in 2:2){
+  for (k in 1:length(demographic.output[[i]])){
+
+    #Subset matrix with patch id = g on 2013
+    if(demographic.output[[i]][[k]]$data$Patch[1]==g){
+      
+      matrix.2013<-demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format
+      
+      lambda.2013<-demographic.output[[i]][[k]]$lambda
+    }
+  }
+  }
+  
+  
+  for(i in 3:3){
+  for (k in 1:length(demographic.output[[i]])){
+
+    #Subset matrix with patch id = g on 2015
+    if(demographic.output[[i]][[k]]$data$Patch[1]==g){
+      
+      matrix.2015<-demographic.output[[i]][[k]]$growth.fecundity.matrix.IPM.format
+      
+      lambda.2015<-demographic.output[[i]][[k]]$lambda
+    }
+  }
+  }
+  #Obtain the lambda rank of the 2013 matrix
+rank2<<-lambda.analysis %>% 
+      filter(year==2013)
+
+    
+    jpeg(filename=paste("Graphs/Clump/LTRE between years 2013 rank ",rank2[rank2$Patch==g,"rank"], " patch ",g,".jpg",sep=""),width = 500, height = 500,quality=100,res=150)
+par(mfrow=c(1,1))
+
+
+
+    IPM.mid=(matrix.2013+matrix.2015)/2
+    D=matrix.2013-matrix.2015
+    sensIPM.mid=sens(IPM.mid)
+    Contrib=D*sensIPM.mid
+
+image.plot(c(0, matrix.2015@meshpoints),c(0, matrix.2015@meshpoints),t(Contrib), xlab="Size (t)",ylab="Size (t+1)",col=heat.colors(30), main=paste("LTRE between years of patch",g),zlim=c(min(Contrib),max(Contrib)))
+abline(a = 0, b = 1, lty= 2, col = "black", lwd=2)
+
+mtext(text=paste("lambdas:",round(lambda.2013,2),"vs",round(lambda.2015,2)),side=3)
+
+dev.off()
+
+}
+rm(rank2,hightest.matrix.2015,highest.lambda.2015)
+
+```
