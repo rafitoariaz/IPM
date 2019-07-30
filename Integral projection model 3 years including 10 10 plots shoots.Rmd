@@ -193,12 +193,14 @@ growth.survival.data<-list(first.transition=merge(aggregate.height[[1]],aggregat
 
 ##Add a 1 to the size since there are 0's and when I log transform the value I get isn -inf
 for (i in 1:2){
-  growth.survival.data[[i]]$size.x<-growth.survival.data[[i]]$size.x+1
+  #growth.survival.data[[i]]$size.x<-growth.survival.data[[i]]$size.x+1
+  growth.survival.data[[i]]$size.x<-growth.survival.data[[i]]$size.x
   colnames(growth.survival.data[[i]])[4]<-"size"
 }
 
 for (i in 1:2){
-  growth.survival.data[[i]]$size.y<-growth.survival.data[[i]]$size.y+1
+  #growth.survival.data[[i]]$size.y<-growth.survival.data[[i]]$size.y+1
+  growth.survival.data[[i]]$size.y<-growth.survival.data[[i]]$size.y
   colnames(growth.survival.data[[i]])[5]<-"sizeNext"
 }
 
@@ -215,11 +217,13 @@ function.x<-function(input){
     
     mutate(sizeNext=ifelse(sizeNext==1,NA,sizeNext)) %>%  #The survNext columns can only have values greater than 0. If the individual is dead then it has to say NA
     
-    mutate(sizeOriginal=size-1) %>% #Here I am saving the original size data before log transforming it. I substract 1 because before I summed 1 to log transform it later
-    mutate(sizeNextOriginal=sizeNext-1) %>% 
+    #mutate(sizeOriginal=size-1) %>% #Here I am saving the original size data before log transforming it. I substract 1 because before I summed 1 to log transform it later
+    mutate(sizeOriginal=size) %>% #Here I am saving the original size data before log transforming it. I substract 1 because before I summed 1 to log transform it later
+    #mutate(sizeNextOriginal=sizeNext-1) %>% 
+     mutate(sizeNextOriginal=sizeNext) %>% 
     
-    mutate(size=log(size)) %>% #log transform data
-    mutate(sizeNext=log(sizeNext)) %>% 
+    #mutate(size=log(size)) %>% #log transform data
+    #mutate(sizeNext=log(sizeNext)) %>% 
     
     mutate(stage="continuous",stageNext="continuous") %>% #Add a column to specify if the size and sizeNext are continuous or discrete
     
