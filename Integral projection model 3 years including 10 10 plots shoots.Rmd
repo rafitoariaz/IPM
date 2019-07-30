@@ -738,7 +738,7 @@ inner_join(bind_rows(select(data_growth_surv_diff_canopy2,Patch,Plot,Clump,year,
   ggplot(aes(x=num.shoots,y=height)) +
   geom_point(position = position_jitter(height = 0, width = 0.05), alpha = 0.5) +
   geom_smooth() +
-  xlab("Log number of shoots") +
+  xlab("Number of shoots") +
   ylab("Log height")
 
 rm(function.x,data_growth_surv_diff_canopy2,growth.survival.data2)
@@ -755,60 +755,46 @@ rm(function.x,data_growth_surv_diff_canopy2,growth.survival.data2)
 #Plot pairs
 pairs(data_growth_surv_diff_canopy[,c("sizeNext","size","logpatch_size","percent_forest","elevation","mean_openess","year")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth) #It would be great to add colors depending on the year
 
-####################
 #Model without random structure
-mod.1<-glm(fec3 ~ size +  logpatch_size + percent_forest + elevation + mean_openess+year, family="poisson", data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"))
-summary(mod.1)
+summary(mod.1<-glm(sizeNext ~ size +  logpatch_size+percent_forest+elevation+mean_openess+year, family="poisson", data=data_growth_surv_diff_canopy))
+
 
 library("lme4")
 
 #GLMM nesting Patch
-mod.2<-glmer(fec3 ~ scale(size) +  scale(logpatch_size) + scale(percent_forest) + scale(elevation) + scale(mean_openess) + year+(1 | Patch),data=subset(data_reproduction_analysis,is.na(data_reproduction_analysis$fec3)=="FALSE"),family="poisson") #Convergence error
-summary(mod.2)
+summary(mod.2<-glmer(sizeNext~scale(size) + scale(logpatch_size) + scale(percent_forest) + scale(elevation) + scale(mean_openess) + year+(1 | Patch),data=data_growth_surv_diff_canopy,family="poisson")) #Convergence error
 
 
-#Model without random structure
-mod.1<-gls(sizeNext ~ size +  logpatch_size+percent_forest+elevation+mean_openess+year,method = "REML", data = data_growth_surv_diff_canopy)
-summary(mod.1)
-
-
-#GLMM random intercept
-mod.2<-lme(sizeNext~size+logpatch_size+percent_forest+elevation+mean_openess+year,random = ~1 | Patch,data=data_growth_surv_diff_canopy,method="REML")
-summary(mod.2) #This model looks better than the one without the random strucutre. I will continue selecting variables based on this last model
-
-#GLMM random intercept and slope
-summary(mod.3<-lme(sizeNext~size+logpatch_size+percent_forest+elevation+mean_openess+year,random = ~1 + size | Patch,data=data_growth_surv_diff_canopy,method="REML"))
-
-anova(mod.1,mod.2,mod.3)
+anova(mod.1,mod.2)
 
 #Without canopy openess
-summary(mod.4<-update(mod.3,.~.-mean_openess))
-
-#Without year
-summary(mod.5<-update(mod.4,.~.-year))
+summary(mod.3<-update(mod.1,.~.-mean_openess))
 
 #Without patch size
-summary(mod.6<-update(mod.5,.~.-logpatch_size))
+summary(mod.4<-update(mod.3,.~.-logpatch_size))
 
 #Without percent of forest
-summary(mod.7<-update(mod.6,.~.-percent_forest))
+summary(mod.5<-update(mod.4,.~.-percent_forest))
 
 #Without elevation
-summary(mod.8<-update(mod.7,.~.-elevation))
+summary(mod.6<-update(mod.5,.~.-elevation))
+
+#Without year
+summary(mod.7<-update(mod.6,.~.-year))
 
 
 library("MuMIn")
-Weights(AIC(mod.4,mod.5,mod.6,mod.7,mod.8))
+Weights(AIC(mod.4,mod.5,mod.6,mod.7))
 
 #Select the  best model
-model.selected<-mod.8
+model.selected<-mod.7
 
 #R squard from model selected
 r.squaredGLMM(model.selected)
 
 #Check assumptions of the model
 plot(model.selected) #I do not know if the assumption is met in this plot
-residuals<-resid(model.selected,type="normalized")
+residuals<-resid(model.selected)
 plot(data_growth_surv_diff_canopy$size,residuals)
 plot(data_growth_surv_diff_canopy$elevation,residuals)
 
@@ -817,9 +803,10 @@ for (i in 2:length(demographic.output)){
   
   for (k in 1:length(demographic.output[[i]])){
     
-    demographic.output[[i]][[k]]$p.vec<-cbind(subset(coef(model.selected),row.names(coef(model.selected))==demographic.output[[i]][[k]]$data$Patch[1]),sd(resid(model.selected)))
-    #names(demographic.output[[i]][[k]]$p.vec)<-c("growth.int","growth.scale.size","growth.sd")
-    names(demographic.output[[i]][[k]]$p.vec)<-c("growth.int","growth.size","growth.sd")
+    #demographic.output[[i]][[k]]$p.vec<-cbind(subset(coef(model.selected),row.names(coef(model.selected))==demographic.output[[i]][[k]]$data$Patch[1]),sd(resid(model.selected)))
+    demographic.output[[i]][[k]]$p.vec<-data.frame(cbind(coef(model.selected)[1],coef(model.selected)[2],sd(resid(model.selected))))
+    
+    colnames(demographic.output[[i]][[k]]$p.vec)<-c("growth.int","growth.size","growth.sd")
     
   }
 }
@@ -836,7 +823,7 @@ for (i in 2:length(demographic.output)){
 #}
 
 growth.function=function(xp, x, params){
-d = dnorm(xp, mean=params$growth.int + params$growth.size * x, sd=params$growth.sd)
+d = dpois(xp, mean=params$growth.int + params$growth.size * x, sd=params$growth.sd)
 return(d)
 }
 
@@ -854,7 +841,7 @@ rm(list=grep("mod.", ls(), value = TRUE),residuals)
 #plot(density(data_surv_canopy$sizeNext[!is.na(data_surv_canopy$sizeNext)]),xlab="Size(t+1)",main="Observed distribution of sizes")
 
 growth.fun.pred=function(x,params) {
-u=params$growth.int+params$growth.size*x
+u=exp(params$growth.int+params$growth.size*x)
 return(u)
 }
 ```
@@ -863,7 +850,7 @@ return(u)
 ```{r,echo=F}
 
 #Generate a sequence of sizes that go from the minimum to the maximum found in the data base
-xx=seq(min(data_growth_surv_diff_canopy$size,na.rm=T),max(data_growth_surv_diff_canopy$sizeNext,na.rm=T),by=.01)
+xx=seq(min(data_growth_surv_diff_canopy$size,data_growth_surv_diff_canopy$size,na.rm=T),max(data_growth_surv_diff_canopy$size,data_growth_surv_diff_canopy$sizeNext,na.rm=T),by=.01)
 
 #Create a vector where the predicted values will go
 predicted.values<-as.numeric(1:length(xx))
@@ -888,28 +875,12 @@ dev.off()
 rm(xx,growth.fun.pred,xx)
 
 #Plot with log number of shoots
-data_growth_surv_diff_canopy %>% ggplot(aes(x=size,y=sizeNext)) + geom_point(position = position_jitter(height = 0, width = 0.1), alpha = 0.5) + geom_smooth(method="lm",col="red") + geom_abline(intercept=0,slope=1,col="blue",linetype="dashed",size=1) +
+data_growth_surv_diff_canopy %>% ggplot(aes(x=size,y=sizeNext)) + geom_point(position = position_jitter(height = 0, width = 0.1), alpha = 0.5) + geom_smooth(method = "glm",se = F, 
+        method.args = list(family = "poisson"),col="red") + geom_abline(intercept=0,slope=1,col="blue",linetype="dashed",size=1) +
   xlab("Log number of shoots at time time t") +
   ylab("Log number of shoots at time time t+1")
 ggsave("Graphs/Clump/growth log ggplot.jpg")
 
-#Plot with number of shoots
-data_growth_surv_diff_canopy %>% ggplot(aes(x=sizeOriginal,y=sizeNextOriginal)) +
-  geom_point(position = position_jitter(height = 0, width = 0.2), alpha = 0.5) +
-  geom_smooth(method="lm",col="red") +
-  geom_abline(intercept=0,slope=1,col="blue",linetype="dashed",size=1) +
-  xlab("Number of shoots at time time t") +
-  ylab("Number of shoots at time time t+1")
-ggsave("Graphs/Clump/growth ggplot.jpg")
-
-#Plot with number of shoots with less than 20 shoots
-data_growth_surv_diff_canopy %>% filter(sizeOriginal<20) %>% ggplot(aes(x=sizeOriginal,y=sizeNextOriginal)) +
-    geom_point(position = position_jitter(height = 0, width = 0.2), alpha = 0.5) +
-    geom_smooth(method="lm",col="red") +
-    geom_abline(intercept=0,slope=1,col="blue",linetype="dashed",size=1) +
-    xlab("Number of shoots at time time t") +
-    ylab("Number of shoots at time time t+1")
-ggsave("Graphs/Clump/growth ggplot less 20 shoots.jpg")
 ```
 
 
