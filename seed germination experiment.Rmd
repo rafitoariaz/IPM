@@ -1,0 +1,200 @@
+---
+title: "Seed predation"
+author: "Luis Antonio Arias Medellin"
+date: "September 27, 2018"
+output: html_document
+---
+```{r}
+#Remove anything on workspace
+#rm(list=ls(all=TRUE))
+
+#Load libraries
+library("openxlsx")
+
+#Read file
+seeds<-read.xlsx("Seed predation seedling survival experiemtents 2018.04.27.xlsx",sheet=5)
+
+#Format date
+seeds$Date<-as.Date(seeds$Date,origin="1899-12-30")
+
+#See which years were the patches sampled
+table(seeds$Site,substr(seeds$Date,1,4))
+
+#The column seeds_germinated, the id of the seed was written separated by a comma or an N was placed when none of the seeds germinated. I will first change the N for a 0 to make the column 
+table(seeds$Seeds_germinated)
+
+germination.data<-rbind(data.frame(Site=rep(unique(seeds$Site),times=1),tray=1),data.frame(Site=rep(unique(seeds$Site),times=1),tray=2))
+germination.data$prop.germ<-NA
+
+seeds$Seeds_germinated<-ifelse(seeds$Seeds_germinated=="N",0,seeds$Seeds_germinated)
+
+for (i in seeds$Site){
+  subset.site<-subset(seeds,seeds$Site==i)
+  germinated.seeds.id<-unique(unlist(strsplit(subset.site$Seeds_germinated,split=",")))
+  germinated.seeds.database<-data.frame(Site=rep(i,length.out=length(germinated.seeds.id)),id=as.numeric(germinated.seeds.id))
+  germinated.seeds.database$tray<-ifelse(germinated.seeds.database$id<=15,1,2)
+  germinated.seeds.database$counts<-1
+  germinated.seeds.database<-aggregate(germinated.seeds.database$counts,by=list(Site=germinated.seeds.database$Site,tray=germinated.seeds.database$tray),FUN=sum)
+  colnames(germinated.seeds.database)[3]<-"prop.germ"
+  germinated.seeds.database$prop.germ<-germinated.seeds.database$prop.germ/20
+  for (l in 1:nrow(germinated.seeds.database)){
+  germination.data$prop.germ<-ifelse(germination.data$Site==germinated.seeds.database$Site[l] & germination.data$tray==germinated.seeds.database$tray[l],germinated.seeds.database$prop.germ[l],germination.data$prop.germ)
+  }
+}
+
+#Read excel data base of patch id, patch size and % forest
+patches<-read.xlsx("Site_info_Costa_Rica.xlsx",sheet=1)
+
+#Keep columns of interest
+patches<-patches[,c(1,5,6,3)]
+
+#Rename columns
+colnames(patches)<-c("Site","percent_forest","elevation","patch_size")
+
+
+#Merge areas with patch information data bases
+germination.data<-merge(germination.data,patches,by="Site")
+
+rm(seeds,subset.site,germinated.seeds.id,patches)
+
+```
+
+```{r,echo=F}
+#ANALYSIS OF GROWTH USING CANOPY OPENESS
+
+#Obtain the canopy openess values from another script I made. Purl is used to obtain the code from an RMD file. If I run it, I need to go direclty to the ouput
+library("knitr")
+#purl("Canopy openess analysis.Rmd",output="Canopy openess analysis code.R")
+#I HAVE TO ANALYZE DATA OF CANOPY OPENESS BY YEAR TO SEE IF THEY ARE DIFFERENCES
+source("Canopy openess analysis code.R",local=T)
+
+#I will remove data bases that I used in the source file but will not use here
+rm(canopy,patches,agg.score)
+```
+
+
+```{r,echo=FALSE}
+
+panel.hist <- function(x, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(usr[1:2], 0, 1.5) )
+    h <- hist(x, plot = FALSE)
+    breaks <- h$breaks; nB <- length(breaks)
+    y <- h$counts; y <- y/max(y)
+    rect(breaks[-nB], 0, breaks[-1], y, col = "cyan", ...)
+}
+
+
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(0, 1, 0, 1))
+    r <- abs(cor(x, y))
+    txt <- format(c(r, 0.123456789), digits = digits)[1]
+    txt <- paste0(prefix, txt)
+    if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+    text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+```
+
+
+```{r}
+boxplot(germination.data$prop.germ)
+
+germination.data<-merge(germination.data,agg.openess[,c("Patch","mean_openess")],by.x="Site",by.y="Patch",all=F)
+
+germination.data$logpatch_size<-log(germination.data$patch_size)
+pairs(germination.data[,c("prop.germ","logpatch_size","percent_forest","elevation","mean_openess")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+germination.data$prop.germ.transformed<-sqrt(asin(germination.data$prop.germ))
+
+pairs(germination.data[,c("prop.germ.transformed","logpatch_size","percent_forest","elevation","mean_openess")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+```
+
+```{r}
+library("nlme")
+#GLMM nesting plot. I AM SUBSETING THE DATA THAT HAS NA
+mod.1<-lme(sqrt(asin(prop.germ))~scale(logpatch_size)+scale(percent_forest)+scale(elevation) + scale(mean_openess),random = ~1 | Site,data=subset(germination.data,germination.data$prop.germ>0),method="REML")
+summary(mod.1)
+
+#Took out elevation
+mod.2<-lme(sqrt(asin(prop.germ))~scale(logpatch_size)+scale(percent_forest)+ scale(mean_openess),random = ~1 | Site,data=subset(germination.data,germination.data$prop.germ>0),method="REML")
+summary(mod.2)
+
+#Took out patch size
+mod.3<-lme(sqrt(asin(prop.germ))~scale(percent_forest)+ scale(mean_openess),random = ~1 | Site,data=subset(germination.data,germination.data$prop.germ>0),method="REML")
+summary(mod.3)
+
+#Without percent of forest
+mod.4<-lme(sqrt(asin(prop.germ))~ scale(mean_openess),random = ~1 | Site,data=subset(germination.data,germination.data$prop.germ>0),method="REML")
+summary(mod.4)
+
+AIC(mod.1,mod.2,mod.3,mod.4)
+library("MuMIn")
+Weights(AIC(mod.1,mod.2,mod.3,mod.4))
+
+p1<-germination.data %>% 
+  ggplot(aes(x=logpatch_size,y=prop.germ)) + 
+  geom_point() + 
+  geom_smooth(method="lm",colour="red") +
+  xlab("Log patch size") +
+  ylab("Probability of germination") +
+  geom_text(x=6.7, y=0.45, label="a)",fontface="bold")
+
+p2<-germination.data %>% 
+  ggplot(aes(x=percent_forest,y=prop.germ)) + 
+  geom_point() + 
+  geom_smooth(method="lm",colour="red") +
+  xlab("Percent of forest") +
+  ylab("Probability of germination") +
+  geom_text(x=70,y=0.45,label="b)",fontface="bold")
+
+p3<-germination.data %>% 
+  ggplot(aes(x=elevation,y=prop.germ)) + 
+  geom_point() + 
+  geom_smooth(method="lm",colour="red") +
+  xlab("Elevation") +
+  ylab("Probability of germination") +
+  geom_text(x=1490, y=0.45, label="c)",fontface="bold")
+
+p4<-germination.data %>% 
+  ggplot(aes(x=mean_openess,y=prop.germ)) + 
+  geom_point() + 
+  geom_smooth(method="lm",colour="red") +
+  xlab("Mean canopy openness (%)") +
+  ylab("Probability of germination") +
+  geom_text(x=19,y=0.45,label="d)",fontface="bold")
+
+library("gridExtra")
+p5<-grid.arrange(p1, p2,p3,p4, ncol=2)
+ggsave("Graphs/seed germination vs variables.jpg",plot=p5)
+
+
+rm(p1,p2,p3,p4,p5)
+
+jpeg("Graphs/seed germination.jpg",quality=100,width=1500,height=700)
+par(mar=c(5,8,5,2),mfrow=c(2,2),xpd=NA)
+#Patch size
+plot(subset(germination.data,germination.data$prop.germ>0)$logpatch_size,subset(germination.data,germination.data$prop.germ>0)$prop.germ,xlab="Log patch size",ylab="",cex.axis=3,cex.lab=3,cex=3,cex.main=3,main="Patch size")
+
+#text(x=650,y=0.7,labels="Probability of germination",cex=3,srt=90)
+
+#Proportion of forest
+plot(subset(germination.data,germination.data$prop.germ>0)$percent_forest,subset(germination.data,germination.data$prop.germ>0)$prop.germ,xlab="Percent of forest",ylab="",cex.axis=3,cex.lab=3,cex=3,cex.main=3,main="Percent of forest")
+
+#Elevation
+plot(subset(germination.data,germination.data$prop.germ>0)$elevation,subset(germination.data,germination.data$prop.germ>0)$prop.germ,xlab="Elevation (m.a.s.l)",ylab="",cex.axis=3,cex.lab=3,cex=3,cex.main=3,main="Elevation")
+
+text(x=730,y=0.6,labels="Probability of germination",cex=3,srt=90)
+
+#Mean openess
+plot(subset(germination.data,germination.data$prop.germ>0)$mean_openess,subset(germination.data,germination.data$prop.germ>0)$prop.germ,xlab="Mean openess (%)",ylab="",cex.axis=3,cex.lab=3,cex=3,cex.main=3,main="Mean openess")
+
+
+#par(new=T)
+#Plot regression line
+#abline(mod.4$coefficients$fixed[1:2],col="red",lwd=3)
+dev.off()
+
+rm(germinated.seeds.database,i)
+```
