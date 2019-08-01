@@ -1,0 +1,224 @@
+---
+title: "Seedling survival experiment"
+author: "Luis Antonio Arias Medellin"
+date: "September 27, 2018"
+output: html_document
+---
+
+```{r,include=F}
+#Remove anything on workspace
+#rm(list=ls(all=TRUE))
+
+#Load libraries
+library("openxlsx")
+
+#Read file
+seedlings<-read.xlsx("Seed predation seedling survival experiemtents 2018.04.27.xlsx",sheet=4)
+
+#Format date
+seedlings$Date<-as.Date(seedlings$Date,origin="1899-12-30")
+
+#Read file. This sheet has information on the date in which seedlings were installed for the first itme and how many seedlings per plot  were planted. A DATE FROM THE ORIGINAL DATA BASE WAS WRONG (SHEET 3, SITE 12 IT SAID YEAR 2915). I MODIFIED IT MANUALLY
+exp.info<-read.xlsx("Seed predation seedling survival experiemtents 2018.04.27.xlsx",sheet=3)
+
+#Format date
+exp.info$date.seedlings.set<-as.Date(exp.info$Date,origin="1899-12-30")
+
+#Seedlings were sampled various times during different years. I will aggregate the data base to obtain the last date in which the seedlings were sampled for survival
+max.dates<-aggregate(seedlings$Date,by=list(Site=seedlings$Site),FUN=max)
+
+#Merge date in which plants were planted with the last day in which they were sampled to obtain how many years the were followed
+max.min.dates<-merge(exp.info[,c(1,67,4)],max.dates,by="Site",all=T)
+
+#Obtain how many years they were followed
+max.min.dates$diff.seedlings.set.check<-(max.min.dates$x-max.min.dates$date.seedlings.set)/365
+
+#Rename column
+colnames(max.min.dates)[4]<-"max.date.seedlings.check"
+
+#There are some seedlings that were checked before their maximum date and that makes them more suitable for this analysis. I will create a data base of which dates for those patches I would like to substract information.
+database.sec.max.dates<-data.frame(Site=c(16,28,29,31,21,33,35,58,63),second.max.date.seedlings.check=as.Date(c("2016-05-25","2016-11-15","2016-11-15","2016-06-14","2016-05-24","2016-05-23","2016-05-24","2016-05-31","2016-06-10")))
+max.min.dates<-merge(max.min.dates,database.sec.max.dates,by="Site",all=T)
+
+
+
+
+
+
+
+#Read file. This sheet has information on the date in which the demographic plots were set. 
+demographic.plots.info.dates<-read.xlsx("Demographic_plot_data_Costa_Rica_forLuisUPDATED.xlsx",sheet=2)
+
+#Format date
+demographic.plots.info.dates$Date.install.demo.plots<-as.Date(demographic.plots.info.dates$Date_install,origin="1899-12-30")
+
+#The demographic plots in each patch sometimes were installed in different days. I will aggregate the data base to obtain the last date in which the demographic plots were sampled installed
+max.dates.demographic.plots<-aggregate(demographic.plots.info.dates$Date.install.demo.plots,by=list(Site=demographic.plots.info.dates$Patch),FUN=max)
+
+#Rename column
+colnames(max.dates.demographic.plots)[2]<-"max.date.set.demo.plot"
+
+#Merge date in which plants were planted with the last day in which they were sampled to obtain how many years the were followed
+max.min.dates<-merge(max.min.dates,max.dates.demographic.plots,by="Site",all=T)
+
+#Obtain how many years passed between the set of the demographic plots and the survival experiment
+max.min.dates$diff.demo.plots.seedlings<-(max.min.dates$date.seedlings.set-max.min.dates$max.date.set.demo.plot)/365
+
+#Numeric values for survival. 1=survived=Y, 0=dead=N. I modified manually the seedling #9 at site 32 because it was dead and the original data base said it was NA.
+seedlings$surv<-ifelse(seedlings$Still_alive=="Y",1,0)
+
+#I will merge the data set of the information of all the times the seedlings were sampled with the data base that has the last date and 2nd last date in which each site was smapled for checking survival. In that way, I will be able to subset the final set of information of survival
+seedlings.max<-merge(seedlings,max.min.dates[,c(1,3,4)],by.x=c("Site","Date"),by.y=c("Site","max.date.seedlings.check"),all=T)
+
+seedlings.sec.max<-merge(seedlings,max.min.dates[,c(1,3,6)],by.x=c("Site","Date"),by.y=c("Site","second.max.date.seedlings.check"),all=T)
+
+#Subset from data base if it coincides with the last date in which seedlings were sampled
+seedlings.subset.max<-subset(seedlings.max,seedlings.max$`#Seedlings.planted`>0)
+seedlings.subset.sec.max<-subset(seedlings.sec.max,seedlings.sec.max$`#Seedlings.planted`>0)
+
+#Aggreagate the number of seedlings that survived per patch
+agg.surv.max<-aggregate(seedlings.subset.max$surv,by=list(Site=seedlings.subset.max$Site),FUN=sum,na.rm=T)
+agg.surv.sec.max<-aggregate(seedlings.subset.sec.max$surv,by=list(Site=seedlings.subset.sec.max$Site),FUN=sum,na.rm=T)
+
+#Rename columns
+colnames(agg.surv.max)[2]<-"surv"
+colnames(agg.surv.sec.max)[2]<-"surv"
+
+agg.surv<-merge(agg.surv.max,agg.surv.sec.max,by="Site",all=T)
+
+agg.surv<-merge(agg.surv,database.sec.max.dates,by="Site",all=T)
+
+colnames(agg.surv)[2]<-"surv"
+
+agg.surv$surv<-ifelse(agg.surv$surv.y>0,agg.surv$surv.y,agg.surv$surv)
+
+agg.surv<-agg.surv[,1:2]
+
+#Merge survival data base with data base that has number of seedling planted per patch
+agg.surv<-merge(agg.surv,max.min.dates[,c(1,3)],by="Site")
+
+#Obtain the proportion of seedlings that survived
+agg.surv$prop.surv<-agg.surv$surv/agg.surv$`#Seedlings.planted`
+  
+#Merge information of patch size, percentage of forest and elevation with survival data base. Read excel data base of patch id, patch size and % forest
+patches<-read.xlsx("Information patches Costa Rica.xlsx",sheet=1)
+
+#Keep columns of interest
+patches<-patches[,c(1,4:6)]
+
+#Rename columns
+colnames(patches)<-c("Patch","percent_forest","elevation","patch_size")
+
+#Transform area to log area
+patches$logarea<-log(patches$patch_size)
+
+#Merge patch information with data base
+agg.surv<-merge(agg.surv,patches,by.x="Site",by.y="Patch",all=F)
+
+```
+
+
+```{r,echo=FALSE}
+
+panel.hist <- function(x, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(usr[1:2], 0, 1.5) )
+    h <- hist(x, plot = FALSE)
+    breaks <- h$breaks; nB <- length(breaks)
+    y <- h$counts; y <- y/max(y)
+    rect(breaks[-nB], 0, breaks[-1], y, col = "cyan", ...)
+}
+
+
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(0, 1, 0, 1))
+    r <- abs(cor(x, y))
+    txt <- format(c(r, 0.123456789), digits = digits)[1]
+    txt <- paste0(prefix, txt)
+    if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+    text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+```
+
+
+```{r}
+##Number of times in which seedlings were sampled per patch and year
+table(seedlings$Site,substr(seedlings$Date,1,4))
+
+##Number of years between the day in which seedlings were planted and the last day in which they were sampled
+max.min.dates
+
+#Obtain the canopy openess values from another script I made. Purl is used to obtain the code from an RMD file. If I run it, I need to go direclty to the ouput
+library("knitr")
+#purl("Canopy openess analysis.Rmd",output="Canopy openess analysis code.R")
+source("Canopy openess analysis code.R",local=T)
+
+#Merge information of growth with patch characteristics and canopy openess
+agg.surv<-merge(agg.surv,agg.openess[,1:2],by.x="Site",by.y="Patch",all=F)
+
+##Graph variables
+pairs(agg.surv[,c("prop.surv","logarea","percent_forest","elevation","mean_openess")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+
+mod.1<-lm(sqrt(asin(agg.surv$prop.surv))~scale(logarea)+scale(percent_forest)+scale(elevation)+scale(mean_openess),data=agg.surv)
+summary(mod.1)
+
+#Without patch size
+mod.2<-lm(sqrt(asin(agg.surv$prop.surv))~scale(percent_forest)+scale(elevation)+scale(mean_openess),data=agg.surv)
+summary(mod.2)
+
+#Without percent of forest
+mod.3<-lm(sqrt(asin(agg.surv$prop.surv))~scale(elevation)+scale(mean_openess),data=agg.surv)
+summary(mod.3)
+
+#Without canopy openess
+mod.4<-lm(sqrt(asin(agg.surv$prop.surv))~scale(elevation),data=agg.surv)
+summary(mod.4)
+
+#Without scaling variable since I need to use the formula for predicting values
+mod.4<-lm(sqrt(asin(agg.surv$prop.surv))~elevation,data=agg.surv)
+summary(mod.4)
+
+regression.sel.surv.seedlings<-mod.4
+
+AIC(mod.1,mod.2,mod.3,mod.4)
+library("MuMIn")
+Weights(AIC(mod.1,mod.2,mod.3,mod.4))
+
+agg.surv %>% 
+  ggplot(aes(x=elevation,y=prop.surv)) + 
+  geom_point() + 
+  geom_smooth(method="lm",colour="red") + 
+  xlab("Elevation (m.a.s.l.)") +
+  ylab("Probability of seedling survival")
+ggsave("Graphs/seedling survival 2.jpg")
+
+jpeg("Graphs/seedling survival.jpg",quality=100,width=1500,height=700)
+par(mar=c(5,6,5,2))
+#Elevation
+plot(agg.surv$elevation,sqrt(asin(agg.surv$prop.surv)),xlab="Elevation (m.a.s.l)",ylab="Probability of survival (sqrt(asin()))",cex.axis=3,cex.lab=3,cex=3,cex.main=3)
+
+#Generate a sequence of sizes so that I can predict values
+prediction<-seq(from=min(agg.surv$elevation,na.rm=T),to=max(agg.surv$elevation,na.rm=T),by=0.01)
+
+
+#Predict values. In the model, I am log transforming the y variable, so by putting exp in the results of the prediction I am transforming the values to it original scale
+res.pred<-mod.4$coefficients[1]+mod.4$coefficients[2]*prediction
+
+
+
+#Draw lines in graph
+lines(prediction,res.pred, col="red",lwd=3)
+
+
+
+#par(new=T)
+#Plot regression line
+#abline(mod.4$coefficients$fixed[1:2],col="red",lwd=3)
+dev.off()
+
+```
+
+```
