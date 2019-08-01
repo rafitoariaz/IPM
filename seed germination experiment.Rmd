@@ -23,24 +23,59 @@ table(seeds$Site,substr(seeds$Date,1,4))
 #The column seeds_germinated, the id of the seed was written separated by a comma or an N was placed when none of the seeds germinated. I will first change the N for a 0 to make the column 
 table(seeds$Seeds_germinated)
 
+#Make empty dat aframe with sites and trays (2 per site)
 germination.data<-rbind(data.frame(Site=rep(unique(seeds$Site),times=1),tray=1),data.frame(Site=rep(unique(seeds$Site),times=1),tray=2))
 germination.data$prop.germ<-NA
 
+#The column seeds_germinated, the id of the seed was written separated by a comma or an N was placed when none of the seeds germinated. I will first change the N for a 0 to make the column 
 seeds$Seeds_germinated<-ifelse(seeds$Seeds_germinated=="N",0,seeds$Seeds_germinated)
 
 for (i in seeds$Site){
+  #Subset site
   subset.site<-subset(seeds,seeds$Site==i)
-  germinated.seeds.id<-unique(unlist(strsplit(subset.site$Seeds_germinated,split=",")))
+  
+  #The column seeds_germinated has the id of the seed that germinated but the numbers are separated by commas (i.e. 15,27). I will separate the id's
+  germinated.seeds.id<-as.numeric(unique(unlist(strsplit(subset.site$Seeds_germinated,split=","))))
+  
+  #If no seeds germinated in any of the trays, then do a data frame with 0 germination so that I can add it to the data frame later
+  if(sum(as.numeric(germinated.seeds.id))==0){ #If the sum  of the vector of seeds id is equal to 0, it means that there were no seeds germinating in any trays, so I will do a special data frame with 0's
+  
+    site.without.germination<-data.frame(Site=rep(unique(subset.site$Site),times=2),tray=1:2,prop.germ=0)
+    
+    #Merge with data base with germination information
+    for (l in 1:nrow(site.without.germination)){
+  germination.data$prop.germ<-ifelse(germination.data$Site==site.without.germination$Site[l] & germination.data$tray==site.without.germination$tray[l],site.without.germination$prop.germ[l],germination.data$prop.germ)
+    
+  }
+    }else{
+  
+  #Subset seeds with id 0 since I think they mean no seeds germinated
+  germinated.seeds.id<-germinated.seeds.id[germinated.seeds.id!="0"]
+  
+  #Do a data frame with the site and id of the germinated seed
   germinated.seeds.database<-data.frame(Site=rep(i,length.out=length(germinated.seeds.id)),id=as.numeric(germinated.seeds.id))
-  germinated.seeds.database$tray<-ifelse(germinated.seeds.database$id<=15,1,2)
+  
+  #Since seeds with id 1-20 where in tray 1 and seeds with id 21-40 hwere in tray 2, I will us the seed id to label them in a tray id
+  germinated.seeds.database$tray<-ifelse(germinated.seeds.database$id<=20,1,2)
+  
+  #Add a column with 1's to count the seeds that germinated
   germinated.seeds.database$counts<-1
-  germinated.seeds.database<-aggregate(germinated.seeds.database$counts,by=list(Site=germinated.seeds.database$Site,tray=germinated.seeds.database$tray),FUN=sum)
+  
+  #Aggregate number of germinated seeds by site and tray
+  germinated.seeds.database<-aggregate(germinated.seeds.database$counts,by=list(Site=germinated.seeds.database$Site,tray=germinated.seeds.database$tray),FUN=sum,na.rm=T)
+  
+  #Column names
   colnames(germinated.seeds.database)[3]<-"prop.germ"
+  
+  #Obtain the proportions of seeds germinated
   germinated.seeds.database$prop.germ<-germinated.seeds.database$prop.germ/20
+  
+  #Put the seed germination rate in the data frame
   for (l in 1:nrow(germinated.seeds.database)){
   germination.data$prop.germ<-ifelse(germination.data$Site==germinated.seeds.database$Site[l] & germination.data$tray==germinated.seeds.database$tray[l],germinated.seeds.database$prop.germ[l],germination.data$prop.germ)
   }
-}
+    }
+  }
 
 #Read excel data base of patch id, patch size and % forest
 patches<-read.xlsx("Site_info_Costa_Rica.xlsx",sheet=1)
@@ -54,6 +89,8 @@ colnames(patches)<-c("Site","percent_forest","elevation","patch_size")
 
 #Merge areas with patch information data bases
 germination.data<-merge(germination.data,patches,by="Site")
+
+germination.data$prop.germ <- replace(germination.data$prop.germ,is.na(germination.data$prop.germ), 0)
 
 rm(seeds,subset.site,germinated.seeds.id,patches)
 
@@ -106,32 +143,37 @@ germination.data<-merge(germination.data,agg.openess[,c("Patch","mean_openess")]
 
 germination.data$logpatch_size<-log(germination.data$patch_size)
 pairs(germination.data[,c("prop.germ","logpatch_size","percent_forest","elevation","mean_openess")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
-germination.data$prop.germ.transformed<-sqrt(asin(germination.data$prop.germ))
+germination.data$prop.germ.transformed<-asin(sqrt(germination.data$prop.germ))
 
 pairs(germination.data[,c("prop.germ.transformed","logpatch_size","percent_forest","elevation","mean_openess")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
 ```
 
 ```{r}
 library("nlme")
+#Model without random factor
+summary(mod.1<-gls(prop.germ.transformed~logpatch_size+percent_forest+elevation + mean_openess,method = "REML", data = germination.data))
+
 #GLMM nesting plot. I AM SUBSETING THE DATA THAT HAS NA
-mod.1<-lme(sqrt(asin(prop.germ))~scale(logpatch_size)+scale(percent_forest)+scale(elevation) + scale(mean_openess),random = ~1 | Site,data=subset(germination.data,germination.data$prop.germ>0),method="REML")
-summary(mod.1)
+summary(mod.2<-lme(prop.germ.transformed~logpatch_size+percent_forest+elevation + mean_openess,random = ~1 | Site,data=germination.data,method="REML"))
+
+#Took out percent of forest
+summary(mod.3<-update(mod.2,.~. -logpatch_size))
 
 #Took out elevation
-mod.2<-lme(sqrt(asin(prop.germ))~scale(logpatch_size)+scale(percent_forest)+ scale(mean_openess),random = ~1 | Site,data=subset(germination.data,germination.data$prop.germ>0),method="REML")
-summary(mod.2)
+summary(mod.4<-update(mod.3,.~. -elevation))
 
-#Took out patch size
-mod.3<-lme(sqrt(asin(prop.germ))~scale(percent_forest)+ scale(mean_openess),random = ~1 | Site,data=subset(germination.data,germination.data$prop.germ>0),method="REML")
-summary(mod.3)
+#Took out mean openness. MARGINALLY SIGNIFICANT
+summary(mod.5<-update(mod.4,.~. -mean_openess))
 
-#Without percent of forest
-mod.4<-lme(sqrt(asin(prop.germ))~ scale(mean_openess),random = ~1 | Site,data=subset(germination.data,germination.data$prop.germ>0),method="REML")
-summary(mod.4)
 
-AIC(mod.1,mod.2,mod.3,mod.4)
+AIC(mod.2,mod.3,mod.4,mod.5)
 library("MuMIn")
 Weights(AIC(mod.1,mod.2,mod.3,mod.4))
+
+#Check assumptions of model
+plot(mod.5)
+residuals.model<-resid(mod.5)
+plot(germination.data$mean_openess,residuals.model)
 
 p1<-germination.data %>% 
   ggplot(aes(x=logpatch_size,y=prop.germ)) + 
@@ -170,31 +212,5 @@ p5<-grid.arrange(p1, p2,p3,p4, ncol=2)
 ggsave("Graphs/seed germination vs variables.jpg",plot=p5)
 
 
-rm(p1,p2,p3,p4,p5)
-
-jpeg("Graphs/seed germination.jpg",quality=100,width=1500,height=700)
-par(mar=c(5,8,5,2),mfrow=c(2,2),xpd=NA)
-#Patch size
-plot(subset(germination.data,germination.data$prop.germ>0)$logpatch_size,subset(germination.data,germination.data$prop.germ>0)$prop.germ,xlab="Log patch size",ylab="",cex.axis=3,cex.lab=3,cex=3,cex.main=3,main="Patch size")
-
-#text(x=650,y=0.7,labels="Probability of germination",cex=3,srt=90)
-
-#Proportion of forest
-plot(subset(germination.data,germination.data$prop.germ>0)$percent_forest,subset(germination.data,germination.data$prop.germ>0)$prop.germ,xlab="Percent of forest",ylab="",cex.axis=3,cex.lab=3,cex=3,cex.main=3,main="Percent of forest")
-
-#Elevation
-plot(subset(germination.data,germination.data$prop.germ>0)$elevation,subset(germination.data,germination.data$prop.germ>0)$prop.germ,xlab="Elevation (m.a.s.l)",ylab="",cex.axis=3,cex.lab=3,cex=3,cex.main=3,main="Elevation")
-
-text(x=730,y=0.6,labels="Probability of germination",cex=3,srt=90)
-
-#Mean openess
-plot(subset(germination.data,germination.data$prop.germ>0)$mean_openess,subset(germination.data,germination.data$prop.germ>0)$prop.germ,xlab="Mean openess (%)",ylab="",cex.axis=3,cex.lab=3,cex=3,cex.main=3,main="Mean openess")
-
-
-#par(new=T)
-#Plot regression line
-#abline(mod.4$coefficients$fixed[1:2],col="red",lwd=3)
-dev.off()
-
-rm(germinated.seeds.database,i)
+rm(p1,p2,p3,p4,p5,germinated.seeds.database,i,residuals.model)
 ```
