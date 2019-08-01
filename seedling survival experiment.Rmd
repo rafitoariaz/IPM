@@ -101,16 +101,13 @@ agg.surv<-merge(agg.surv,max.min.dates[,c(1,3)],by="Site")
 agg.surv$prop.surv<-agg.surv$surv/agg.surv$`#Seedlings.planted`
   
 #Merge information of patch size, percentage of forest and elevation with survival data base. Read excel data base of patch id, patch size and % forest
-patches<-read.xlsx("Information patches Costa Rica.xlsx",sheet=1)
-
-#Keep columns of interest
-patches<-patches[,c(1,4:6)]
-
-#Rename columns
-colnames(patches)<-c("Patch","percent_forest","elevation","patch_size")
-
-#Transform area to log area
-patches$logarea<-log(patches$patch_size)
+patches<-read.xlsx("Site_info_Costa_Rica.xlsx",sheet=1) %>% 
+  rename(Patch=PatchNo, #Rename columns
+         patch_size=Psize_ha,
+         percent_forest=PropFor,
+         elevation=Elv_m) %>% 
+  select(Patch,percent_forest,elevation,patch_size) %>% 
+  mutate(logarea=log(patch_size))
 
 #Merge patch information with data base
 agg.surv<-merge(agg.surv,patches,by.x="Site",by.y="Patch",all=F)
@@ -162,30 +159,34 @@ agg.surv<-merge(agg.surv,agg.openess[,1:2],by.x="Site",by.y="Patch",all=F)
 ##Graph variables
 pairs(agg.surv[,c("prop.surv","logarea","percent_forest","elevation","mean_openess")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
 
-mod.1<-lm(sqrt(asin(agg.surv$prop.surv))~scale(logarea)+scale(percent_forest)+scale(elevation)+scale(mean_openess),data=agg.surv)
-summary(mod.1)
+agg.surv <- agg.surv %>% 
+  mutate(prop.surv.transformed=asin(sqrt(prop.surv)))
+
+pairs(agg.surv[,c("prop.surv.transformed","logarea","percent_forest","elevation","mean_openess")],lower.panel=panel.cor,diag.panel=panel.hist,panel=panel.smooth)
+
+#First model
+summary(mod.1<-lm(prop.surv.transformed~logarea+percent_forest+elevation+mean_openess,data=agg.surv))
+
 
 #Without patch size
-mod.2<-lm(sqrt(asin(agg.surv$prop.surv))~scale(percent_forest)+scale(elevation)+scale(mean_openess),data=agg.surv)
-summary(mod.2)
+summary(mod.2<-update(mod.1,.~. -logarea))
 
 #Without percent of forest
-mod.3<-lm(sqrt(asin(agg.surv$prop.surv))~scale(elevation)+scale(mean_openess),data=agg.surv)
-summary(mod.3)
+summary(mod.3<-update(mod.2,.~. -percent_forest))
 
-#Without canopy openess
-mod.4<-lm(sqrt(asin(agg.surv$prop.surv))~scale(elevation),data=agg.surv)
-summary(mod.4)
-
-#Without scaling variable since I need to use the formula for predicting values
-mod.4<-lm(sqrt(asin(agg.surv$prop.surv))~elevation,data=agg.surv)
-summary(mod.4)
-
-regression.sel.surv.seedlings<-mod.4
+#Without mean openness
+summary(mod.4<-update(mod.3,.~. -mean_openess))
 
 AIC(mod.1,mod.2,mod.3,mod.4)
 library("MuMIn")
 Weights(AIC(mod.1,mod.2,mod.3,mod.4))
+
+
+#Save model
+regression.sel.surv.seedlings<-mod.3
+
+#Check assumptions
+plot(regression.sel.surv.seedlings)
 
 agg.surv %>% 
   ggplot(aes(x=elevation,y=prop.surv)) + 
@@ -195,17 +196,24 @@ agg.surv %>%
   ylab("Probability of seedling survival")
 ggsave("Graphs/seedling survival 2.jpg")
 
+agg.surv %>% 
+  ggplot(aes(x=mean_openess,y=prop.surv)) + 
+  geom_point() + 
+  geom_smooth(method="lm",colour="red") + 
+  xlab("Canopy openness (%)") +
+  ylab("Probability of seedling survival")
+
 jpeg("Graphs/seedling survival.jpg",quality=100,width=1500,height=700)
 par(mar=c(5,6,5,2))
 #Elevation
-plot(agg.surv$elevation,sqrt(asin(agg.surv$prop.surv)),xlab="Elevation (m.a.s.l)",ylab="Probability of survival (sqrt(asin()))",cex.axis=3,cex.lab=3,cex=3,cex.main=3)
+plot(agg.surv$elevation,agg.surv$prop.surv.transformed,xlab="Elevation (m.a.s.l)",ylab="Probability of survival (sqrt(asin()))",cex.axis=3,cex.lab=3,cex=3,cex.main=3)
 
 #Generate a sequence of sizes so that I can predict values
 prediction<-seq(from=min(agg.surv$elevation,na.rm=T),to=max(agg.surv$elevation,na.rm=T),by=0.01)
 
 
 #Predict values. In the model, I am log transforming the y variable, so by putting exp in the results of the prediction I am transforming the values to it original scale
-res.pred<-mod.4$coefficients[1]+mod.4$coefficients[2]*prediction
+res.pred<-regression.sel.surv.seedlings$coefficients[1]+regression.sel.surv.seedlings$coefficients[2]*prediction
 
 
 
